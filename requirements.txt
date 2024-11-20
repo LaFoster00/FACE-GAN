@@ -1,4 +1,6 @@
 tensorflow==2.16.1
+tensorflow-docs
+ipython==8.29.0
 keras==3.6.0
 numpy==1.26.4
 scikit-learn~=1.5.2
