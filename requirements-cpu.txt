@@ -1,0 +1,3 @@
+tensorflow=2.61.1
+
+-r requirements-common.txt
