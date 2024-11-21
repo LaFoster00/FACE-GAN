@@ -8,10 +8,12 @@ import numpy as np
 import pickle
 
 class DataGenerator(utils.Sequence):
-    def __init__(self, image_paths, labels, for_fitting=True, batch_size=32, dim=(256, 256),
-                 n_channels=1, n_classes=10, shuffle=True):
+    def __init__(self, image_paths, labels, label_structure=['face_output', 'age_output', 'gender_output'],
+                 for_fitting=True, batch_size=32, dim=(256, 256), n_channels=1, n_classes=10, shuffle=True):
+        super().__init__()
         self.image_paths = image_paths
         self.labels = labels
+        self.label_structure = label_structure
         self.indices = np.arange(len(self.image_paths))
         self.for_fitting = for_fitting
         self.batch_size = batch_size
@@ -52,9 +54,20 @@ class DataGenerator(utils.Sequence):
         images = []
         for image_path in self.image_paths[indices]:
             images.append(self._load_image(image_path))
+        return images
 
     def _load_batch_labels(self, indices):
-        return self.labels[indices]
+        if self.label_structure is None:
+            return self.labels[indices]
+        else:
+            labels = self.labels[indices]
+            mapped_labels = []
+            for label in labels:
+                mapped_label = {}
+                for index, label_key in enumerate(self.label_structure):
+                    mapped_label[label_key] = label[index]
+                mapped_labels.append(mapped_label)
+            return mapped_labels
 
     def _load_image(self, image_path):
         return utils.img_to_array(utils.load_img(image_path))

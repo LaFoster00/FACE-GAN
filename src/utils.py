@@ -2,6 +2,7 @@ import json
 import pickle
 from pathlib import Path
 import os
+import numpy as np
 
 def generate_ffhq_labels(image_paths):
     # Check if the jsons already exist in a serialized form
@@ -41,7 +42,7 @@ def generate_ffhq_labels(image_paths):
     mapped_labels = {}
     for feature_json_id, feature_json in feature_jsons.items():
         face_attributes = feature_json[0]['faceAttributes']
-        mapped_labels[feature_json_id] = (1, int(face_attributes['gender'] == 'female'), face_attributes['age'])
+        mapped_labels[feature_json_id] = [1, int(face_attributes['gender'] == 'female'), face_attributes['age']]
 
     image_paths = [image_path for image_path in image_paths if int(Path(image_path).stem) in mapped_labels]
     labels = [mapped_labels[int(Path(image_path).stem)] for image_path in image_paths]
@@ -51,7 +52,7 @@ def generate_ffhq_labels(image_paths):
 def load_ffhq_data(path):
     image_paths = [os.path.join(path, image) for image in os.listdir(path) if Path(image).suffix == '.png']
     image_paths, labels = generate_ffhq_labels(image_paths)
-    return image_paths, labels
+    return np.array(image_paths), np.array(labels)
 
 if __name__ == '__main__':
     image_paths, labels = load_ffhq_data('../data/ffhq/images256x256')
