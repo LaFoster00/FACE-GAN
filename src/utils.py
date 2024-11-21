@@ -29,11 +29,13 @@ def generate_ffhq_labels(image_paths):
                     missing_jsons += 1
                     print(f"{missing_jsons}: {feature_json_id} has no features.")
 
-    print("Serializing features json")
-    pickle.dump(
-        feature_jsons,
-        open(serialized_feature_json_dir / serialized_feature_json_id, "wb"),
-        protocol=pickle.HIGHEST_PROTOCOL)
+
+    if not os.path.exists(serialized_feature_json_dir / serialized_feature_json_id):
+        print("Serializing features json")
+        pickle.dump(
+            feature_jsons,
+            open(serialized_feature_json_dir / serialized_feature_json_id, "wb"),
+            protocol=pickle.HIGHEST_PROTOCOL)
 
     print("Mapping features from jsons to png name/number")
     mapped_labels = {}
@@ -53,4 +55,3 @@ def load_ffhq_data(path):
 
 if __name__ == '__main__':
     image_paths, labels = load_ffhq_data('../data/ffhq/images256x256')
-    print(image_paths)
