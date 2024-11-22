@@ -51,8 +51,9 @@ def generate_ffhq_labels(image_paths):
 
 def load_ffhq_data(path):
     image_paths = [os.path.join(path, image) for image in os.listdir(path) if Path(image).suffix == '.png']
+    image_paths.sort()
     image_paths, labels = generate_ffhq_labels(image_paths)
-    return np.array(image_paths), np.array(labels)
+    return np.array(image_paths), np.array(labels, dtype=np.uint8)
 
 if __name__ == '__main__':
     image_paths, labels = load_ffhq_data('../data/ffhq/images256x256')
