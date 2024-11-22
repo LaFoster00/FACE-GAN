@@ -19,8 +19,9 @@ class DataGenerator(utils.Sequence):
                  for_fitting=True,
                  batch_size=32,
                  shuffle=True,
-                 prefetch_batches=16,
-                 max_workers=None):
+                 prefetch_batches=64,
+                 max_workers=None,
+                 dim=(224, 224)):
         super().__init__()
         self.image_paths = image_paths
         self.labels = labels
@@ -29,6 +30,9 @@ class DataGenerator(utils.Sequence):
         self.for_fitting = for_fitting
         self.batch_size = batch_size
         self.shuffle = shuffle
+        self.dim = dim
+        if self.shuffle:
+            np.random.shuffle(self.indices)
 
         # Prefetching setup
         self.prefetch_queue = queue.Queue(maxsize=prefetch_batches)
@@ -58,7 +62,8 @@ class DataGenerator(utils.Sequence):
 
                     # Wrap around if needed
                     if end > len(self.image_paths):
-                        np.random.shuffle(self.indices)
+                        if self.shuffle:
+                            np.random.shuffle(self.indices)
                         self.current_index = 0
                         start = 0
                         end = self.batch_size
@@ -68,15 +73,16 @@ class DataGenerator(utils.Sequence):
 
                     # Parallel image loading
                     futures = []
-                    for image_path in self.image_paths[batch_indices]:
+                    for index, image_path in enumerate(self.image_paths[batch_indices]):
                         futures.append(
-                            self.executor.submit(self._load_image, image_path)
+                            self.executor.submit(self._load_image, image_path, index)
                         )
 
                     # Collect images
-                    images = []
+                    images = [None] * len(batch_indices)
                     for future in as_completed(futures):
-                        images.append(future.result())
+                        image, index = future.result()
+                        images[index] = image
 
                     x = np.array(images)
 
@@ -106,10 +112,6 @@ class DataGenerator(utils.Sequence):
         return self.prefetch_queue.get()
 
     def on_epoch_end(self):
-        """Shuffle data at end of each epoch"""
-        if self.shuffle:
-            np.random.shuffle(self.indices)
-
         # Clear existing queue
         while not self.prefetch_queue.empty():
             try:
@@ -156,9 +158,9 @@ class DataGenerator(utils.Sequence):
                 mapped_labels[label_key] = split_labels[index]
             return mapped_labels
 
-    def _load_image(self, image_path):
+    def _load_image(self, image_path, index):
         """Load and preprocess single image"""
-        return utils.img_to_array(utils.load_img(image_path))
+        return utils.img_to_array(utils.load_img(image_path, target_size=self.dim, interpolation="lanczos"), dtype='uint8'), index
 
     def __del__(self):
         """Clean up resources"""
