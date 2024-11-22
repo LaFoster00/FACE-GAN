@@ -302,7 +302,7 @@ if __name__ == '__main__':
     if os.path.exists(model_save_path / "Face.keras"):
         try:
             model = saving.load_model(model_save_path / "Face.keras")
-            infer_images(DataGenerator(x, y, label_structure, batch_size=8, for_fitting=False, prefetch_batches=1)[0], model)
+            infer_images(DataGenerator(x, y, label_structure, batch_size=8, for_fitting=False, prefetch_batches=1, dim=dim)[0], model)
         except Exception as e:
             print(e)
 
