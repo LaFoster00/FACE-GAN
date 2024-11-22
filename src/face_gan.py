@@ -11,6 +11,7 @@ import csv
 import keras
 from wandb.integration.keras import WandbMetricsLogger
 from pathlib import Path
+import keras
 
 """
 This module contains a multi-task deep learning model for face detection, age estimation, and gender classification. 
@@ -177,7 +178,7 @@ def FaceIdentifier(input_shape=(256, 256, 3), dropout_rate=0.25):
     # Define gender output branch (multi-class classification)
     gender_output = layers.Dense(256, activation='relu', name='gender_1')(x)
     gender_output = layers.Dense(128, activation='relu', name='gender_2')(gender_output)
-    gender_output = layers.Dense(3, activation='softmax', name='gender_output')(gender_output)
+    gender_output = layers.Dense(1, activation='sigmoid', name='gender_output')(gender_output)
 
     # Combine all branches into a final model
     model = models.Model(inputs=inputs, outputs={'face_output': face_output,
@@ -191,7 +192,7 @@ def FaceIdentifier(input_shape=(256, 256, 3), dropout_rate=0.25):
         loss={
             'face_output': losses.BinaryCrossentropy(),
             'age_output': age_loss_fn,
-            'gender_output': gender_metric,
+            'gender_output': gender_loss_fn,
         },
         metrics={
             'face_output': metrics.BinaryAccuracy(),
@@ -333,6 +334,7 @@ if __name__ == '__main__':
         model_callbacks.append(WandbMetricsLogger())
     except Exception as e:
         print("No wandb callback added.")
+
 
     history = model.fit(x=training_generator,
                         validation_data=val_generator,
