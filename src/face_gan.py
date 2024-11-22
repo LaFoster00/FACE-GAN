@@ -1,8 +1,9 @@
 import os
 import numpy as np
+from matplotlib import pyplot
+
 import wandb
-from keras import models, layers, applications, metrics, losses, optimizers, callbacks, saving, ops, utils, backend, \
-    random
+from keras import models, layers, applications, metrics, losses, optimizers, callbacks, saving, ops, utils, backend
 from utils import load_ffhq_data
 from data_generator import DataGenerator
 import matplotlib.pyplot as plt
@@ -12,6 +13,7 @@ import keras
 from wandb.integration.keras import WandbMetricsLogger
 from pathlib import Path
 import keras
+import random
 
 """
 This module contains a multi-task deep learning model for face detection, age estimation, and gender classification. 
@@ -63,8 +65,8 @@ def preprocessing_pipeline(inputs):
     - Random Contrast
     - Random Grayscale conversion
     """
-    x = layers.RandomZoom(0.2)(inputs)
-    x = layers.RandomRotation(0.2)(x)
+    #x = layers.RandomZoom(0.2)(inputs)
+    x = layers.RandomRotation(0.1)(inputs)
     x = layers.RandomFlip("horizontal")(x)
     x = layers.RandomBrightness(0.1)(x)
     x = layers.RandomContrast(0.1)(x)
@@ -102,8 +104,11 @@ def age_metric(y_true, y_pred):
     Returns:
     - metric: Mean absolute error between true and predicted ages for valid entries.
     """
-    y_pred = y_pred * ops.cast(ops.less(y_true, 200), y_pred.dtype)
-    y_true = y_true * ops.cast(ops.less(y_true, 200), y_true.dtype)
+    mask = ops.less(y_true, 200)
+    mask_pred = ops.expand_dims(mask, axis=-1)
+
+    y_pred = ops.where(mask_pred, y_pred, ops.zeros_like(y_pred))
+    y_true = ops.where(mask, y_true, ops.zeros_like(y_true))
     return metrics.mean_absolute_error(y_true, y_pred)
 
 
@@ -136,8 +141,12 @@ def gender_metric(y_true, y_pred):
     Returns:
     - metric: Binary accuracy between true and predicted gender labels.
     """
-    y_pred = y_pred * ops.cast(ops.less(y_true, 2), y_pred.dtype)
-    y_true = y_true * ops.cast(ops.less(y_true, 2), y_true.dtype)
+
+    mask = ops.less(y_true, 2)
+    mask_pred = ops.expand_dims(mask, axis=-1)
+
+    y_pred = ops.where(mask_pred, y_pred, ops.zeros_like(y_pred))
+    y_true = ops.where(mask, y_true, ops.zeros_like(y_true))
     return metrics.binary_accuracy(y_true, y_pred)
 
 
@@ -171,13 +180,14 @@ def FaceIdentifier(input_shape=(256, 256, 3), dropout_rate=0.25):
     face_output = layers.Dense(1, activation='sigmoid', name='face_output')(face_output)
 
     # Define age output branch (regression)
-    age_output = layers.Dense(256, activation='relu', name='age_1')(x)
+    age_output = layers.Dense(2024, activation='relu', name='age_1')(x)
+    age_output = layers.Dense(2024, activation='relu', name='age_2')(age_output)
     age_output = layers.Dropout(rate=dropout_rate, name='age_dropout')(age_output)
     age_output = layers.Dense(1, activation='relu', name='age_output')(age_output)
 
     # Define gender output branch (multi-class classification)
-    gender_output = layers.Dense(256, activation='relu', name='gender_1')(x)
-    gender_output = layers.Dense(128, activation='relu', name='gender_2')(gender_output)
+    gender_output = layers.Dense(2024, activation='relu', name='gender_1')(x)
+    gender_output = layers.Dense(2024, activation='relu', name='gender_2')(gender_output)
     gender_output = layers.Dense(1, activation='sigmoid', name='gender_output')(gender_output)
 
     # Combine all branches into a final model
@@ -188,7 +198,7 @@ def FaceIdentifier(input_shape=(256, 256, 3), dropout_rate=0.25):
     # Compile the model with respective loss functions and metrics
     model.compile(
         run_eagerly=False,
-        optimizer=optimizers.Adam(learning_rate=3e-4),
+        optimizer=optimizers.Adam(learning_rate=0.001),
         loss={
             'face_output': losses.BinaryCrossentropy(),
             'age_output': age_loss_fn,
@@ -218,8 +228,10 @@ def infer_images(images, model, show=True):
     Returns:
     - None
     """
+    results = []
     for image in images:
-        return infer_image(image, model, show)
+         results.append(infer_image(image, model, show))
+    return results
 
 
 def infer_image(image, model, show=True):
@@ -239,68 +251,85 @@ def infer_image(image, model, show=True):
         plt.show()
 
     predictions = model.predict(ops.expand_dims(image, 0))
-    score_face = float(predictions['face_output'][0])
+    score_face = float(predictions['face_output'][0][0])
     score_age = round(predictions['age_output'][0][0])
-    score_gender = float(ops.argmax(predictions['gender_output'][0]))
+    score_gender = float(predictions['gender_output'][0][0])
 
     label = f"This image contains a face with {100 * score_face:.2f}% certainty."
     print(label)
 
     if score_face > 0.5:
-        additional_label = f"The person has gender {'male' if score_gender == 0 else 'female'} and is {score_age} years old."
+        additional_label = f"The person has gender {'male' if score_gender <= 0.5 else 'female'} and is {score_age} years old."
         print(additional_label)
         label += '\n' + additional_label
 
     return label
 
 
+def show_generator_test(images, labels):
+    test_generator = DataGenerator(images, labels, label_structure=None, batch_size=32, shuffle=True)
+    test_images, test_labels = test_generator[0]
+    for image in test_images:
+        pyplot.imshow(image)
+        pyplot.show()
+
+    print(test_labels)
+
+
 if __name__ == '__main__':
-    # Define directories
-    images, labels = load_ffhq_data(Path(__file__).parent / '../data/ffhq/images256x256')
-
-    # Step 1: Split data into training (80%) and test+validation (20%) sets
-    images_train, images_temp, labels_train, labels_temp = model_selection.train_test_split(images,
-                                                                                            labels,
-                                                                                            test_size=0.2,
-                                                                                            random_state=42)
-
-    # Step 2: Split the remaining 20% data into validation (10%) and test (10%) sets
-    images_val, images_test, labels_val, labels_test = model_selection.train_test_split(images_temp,
-                                                                                        labels_temp,
-                                                                                        test_size=0.5,
-                                                                                        random_state=42)
-
-    if os.path.exists("saved_models/Face.keras"):
-        try:
-            model = saving.load_model("saved_models/Face.keras")
-            infer_images(images[np.random.choice(images.shape[0], 8, replace=False)], model)
-        except Exception as e:
-            print(e)
+    model_save_path = Path("saved_models")
 
     batch_size = 32
     preprocess = applications.efficientnet.preprocess_input
+    dim = (256, 256)
     label_structure = ['face_output', 'age_output', 'gender_output']
+
+    # Load data
+    x, y = load_ffhq_data(Path(__file__).parent / '../data/ffhq/images256x256')
+
+    # Step 1: Split data into training (80%) and test+validation (20%) sets
+    x_train, x_temp, labels_train, labels_temp = model_selection.train_test_split(x,
+                                                                                  y,
+                                                                                  test_size=0.2,
+                                                                                  random_state=random.randint(0, 20000))
+
+    # Step 2: Split the remaining 20% data into validation (10%) and test (10%) sets
+    x_val, x_test, labels_val, labels_test = model_selection.train_test_split(x_temp,
+                                                                              labels_temp,
+                                                                              test_size=0.5,
+                                                                              random_state=random.randint(0, 20000))
+
+    if os.path.exists(model_save_path / "Face.keras"):
+        try:
+            model = saving.load_model(model_save_path / "Face.keras")
+            infer_images(DataGenerator(x, y, label_structure, batch_size=8, for_fitting=False, prefetch_batches=1)[0], model)
+        except Exception as e:
+            print(e)
+
     training_generator = DataGenerator(
-        image_paths = images_train,
+        image_paths = x_train,
         labels = labels_train,
         label_structure=label_structure,
-        batch_size=batch_size)
+        batch_size=batch_size,
+        dim=dim)
 
     val_generator = DataGenerator(
-        image_paths=images_val,
+        image_paths=x_val,
         labels=labels_val,
         label_structure=label_structure,
-        batch_size=batch_size)
+        batch_size=batch_size,
+        dim=dim)
 
     test_generator = DataGenerator(
-        image_paths=images_test,
+        image_paths=x_test,
         labels=labels_test,
         label_structure=label_structure,
-        batch_size=batch_size)
+        batch_size=batch_size,
+        dim=dim)
 
     checkpoint_filepath = '/tmp/checkpoints/checkpoint.face.keras'
 
-    model = FaceIdentifier((256, 256, 3), 0.25)
+    model = FaceIdentifier((*dim, 3), 0.25)
     model.summary()
     # if os.path.exists(checkpoint_filepath):
     # model.load_weights(checkpoint_filepath)
@@ -316,7 +345,7 @@ if __name__ == '__main__':
 
     model_callbacks.append(callbacks.EarlyStopping(
         monitor='val_loss',
-        min_delta=0.0001,
+        min_delta=0.001,
         patience=5,
         restore_best_weights=True,
         mode="min"
@@ -338,13 +367,16 @@ if __name__ == '__main__':
 
     history = model.fit(x=training_generator,
                         validation_data=val_generator,
-                        epochs=500,
+                        epochs=5,
                         callbacks=model_callbacks)
     print(history)
 
     result = model.evaluate(x=test_generator)
 
     print(result)
+
+    model_save_path = Path("saved_models")
+    model_save_path.mkdir(parents=True, exist_ok=True)
 
     model.save("saved_models/Face.keras")
 
@@ -353,8 +385,8 @@ if __name__ == '__main__':
                              return_dict=True)
     print(results)
 
-    model = saving.load_model("saved_models/Face.keras")
-    infer_images(images[np.random.choice(images.shape[0], 8, replace=False)], model)
+    model = saving.load_model(model_save_path / "Face.keras")
+    infer_images(DataGenerator(x, y, label_structure, batch_size=8, for_fitting=False)[0], model)
 
     with open('saved_models/training_history_dropout_face.csv', mode='w', newline='') as file:
         writer = csv.writer(file)
