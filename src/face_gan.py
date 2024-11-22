@@ -167,7 +167,7 @@ def FaceIdentifier(input_shape=(256, 256, 3), dropout_rate=0.25):
     x = preprocessing_pipeline(inputs)
 
     # Load pre-trained EfficientNetB0 as the base model (frozen weights)
-    basemodel = applications.efficientnet.EfficientNetB0(weights='imagenet', include_top=False)
+    basemodel = applications.efficientnet.EfficientNetB4(weights='imagenet', include_top=False)
     basemodel.trainable = False
     x = basemodel(x)
 
@@ -181,13 +181,14 @@ def FaceIdentifier(input_shape=(256, 256, 3), dropout_rate=0.25):
 
     # Define age output branch (regression)
     age_output = layers.Dense(2024, activation='relu', name='age_1')(x)
-    age_output = layers.Dense(2024, activation='relu', name='age_2')(age_output)
+    age_output = layers.Dense(1024, activation='relu', name='age_2')(age_output)
     age_output = layers.Dropout(rate=dropout_rate, name='age_dropout')(age_output)
     age_output = layers.Dense(1, activation='relu', name='age_output')(age_output)
 
     # Define gender output branch (multi-class classification)
     gender_output = layers.Dense(2024, activation='relu', name='gender_1')(x)
-    gender_output = layers.Dense(2024, activation='relu', name='gender_2')(gender_output)
+    gender_output = layers.Dense(1024, activation='relu', name='gender_2')(gender_output)
+    gender_output = layers.Dropout(rate=dropout_rate, name='gender_dropout')(gender_output)
     gender_output = layers.Dense(1, activation='sigmoid', name='gender_output')(gender_output)
 
     # Combine all branches into a final model
@@ -198,7 +199,7 @@ def FaceIdentifier(input_shape=(256, 256, 3), dropout_rate=0.25):
     # Compile the model with respective loss functions and metrics
     model.compile(
         run_eagerly=False,
-        optimizer=optimizers.Adam(learning_rate=0.001),
+        optimizer=optimizers.Adam(learning_rate=3e-4),
         loss={
             'face_output': losses.BinaryCrossentropy(),
             'age_output': age_loss_fn,
@@ -386,7 +387,7 @@ if __name__ == '__main__':
     print(results)
 
     model = saving.load_model(model_save_path / "Face.keras")
-    infer_images(DataGenerator(x, y, label_structure, batch_size=8, for_fitting=False)[0], model)
+    infer_images(DataGenerator(x, y, label_structure, batch_size=8, for_fitting=False, dim=dim)[0], model)
 
     with open('saved_models/training_history_dropout_face.csv', mode='w', newline='') as file:
         writer = csv.writer(file)
