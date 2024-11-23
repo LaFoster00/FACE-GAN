@@ -4,20 +4,20 @@ from types import SimpleNamespace
 
 import numpy as np
 from matplotlib import pyplot
-from numpy.f2py.auxfuncs import throw_error
 
 import wandb
 from keras import models, layers, applications, metrics, losses, optimizers, callbacks, saving, ops, utils, backend
-from utils import load_ffhq_data
+from utils import load_face_data
 from data_generator import DataGenerator
 import matplotlib.pyplot as plt
 from sklearn import model_selection
 import csv
-import keras
 from wandb.integration.keras import WandbMetricsLogger
 from pathlib import Path
 import keras
 import random
+
+from layers import preprocessing_pipeline
 
 """
 This module contains a multi-task deep learning model for face detection, age estimation, and gender classification. 
@@ -28,55 +28,6 @@ Key Features:
 - **Age Estimation**: A regression task to predict the age of a person in the image.
 - **Gender Classification**: A multi-class classification task to predict the gender of the person in the image.
 """
-
-# Custom Keras layer to randomly convert an image to grayscale during training
-@keras.saving.register_keras_serializable()
-class RandomGrayscale(layers.Layer):
-    def __init__(self, probability=0.5, **kwargs):
-        super().__init__(**kwargs)
-        self.probability = probability
-
-    def call(self, inputs, training=True):
-        """
-        In training mode, randomly convert input images to grayscale with a given probability.
-        This helps the model generalize better.
-        """
-        if training:
-            if np.random.random() > self.probability:
-                # Convert the image to grayscale using the luminance formula
-                grayscale = ops.dot(inputs[..., :3], [0.2989, 0.5870, 0.1140])  # Grayscale formula
-                grayscale = ops.expand_dims(grayscale, axis=-1)
-                # Concatenate the grayscale values back to 3 channels (RGB) to maintain dimensions
-                inputs = ops.concatenate((grayscale, grayscale, grayscale), axis=-1)
-        return inputs
-
-    def get_config(self):
-        """
-        Serialize the configuration of the RandomGrayscale layer so it can be saved.
-        """
-        config = super().get_config()
-        config.update({"probability": self.probability})
-        return config
-
-# Preprocessing pipeline that applies random data augmentations
-def preprocessing_pipeline(inputs, preprocessing):
-    """
-    Applies a sequence of random augmentations to the input images:
-    - Random Zoom
-    - Random Rotation
-    - Random Horizontal Flip
-    - Random Brightness
-    - Random Contrast
-    - Random Grayscale conversion
-    """
-    #x = layers.RandomZoom(0.2)(inputs)
-    x = layers.RandomRotation(0.1)(inputs)
-    x = layers.RandomFlip("horizontal")(x)
-    x = layers.RandomBrightness(0.1)(x)
-    x = layers.RandomContrast(0.1)(x)
-    x = RandomGrayscale(probability=0.5)(x)
-    x = preprocessing(x)
-    return x
 
 
 # Custom loss and metric functions for the age and gender tasks.
@@ -304,16 +255,6 @@ def infer_image(image, model, show=True):
     return label
 
 
-def show_generator_test(images, labels):
-    test_generator = DataGenerator(images, labels, label_structure=None, batch_size=32, shuffle=True)
-    test_images, test_labels = test_generator[0]
-    for image in test_images:
-        pyplot.imshow(image)
-        pyplot.show()
-
-    print(test_labels)
-
-
 def train_and_evaluate_hyperparameters(hyperparameters, x, y, model_save_path, infer_previous_model, infer_finished_model):
     # Data information
     label_structure = ['face_output', 'age_output', 'gender_output']
@@ -500,6 +441,8 @@ if __name__ == '__main__':
     model_save_path.mkdir(parents=True, exist_ok=True)
 
     # Load data
-    x, y = load_ffhq_data(Path(__file__).parent / '../data/ffhq/images256x256')
+    x, y = load_face_data(
+        Path(__file__).parent / '../data/utk-face',
+        Path(__file__).parent / '../data/ffhq/images256x256')
 
     train_and_evaluate_hyperparameters(hyperparameters, x, y, model_save_path, args.infer_previous_model, args.infer_finished_model)

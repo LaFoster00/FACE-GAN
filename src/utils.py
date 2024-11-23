@@ -4,6 +4,17 @@ from pathlib import Path
 import os
 import numpy as np
 
+def append_list(a, b):
+    """
+    Appends the contents of list `b` to list `a`.
+
+    Parameters:
+    - a: list, the target list to be appended to.
+    - b: list, the list to append.
+    """
+    for i in range(len(b)):
+        a.append(b[i])
+
 def generate_ffhq_labels(image_paths):
     # Check if the jsons already exist in a serialized form
     serialized_feature_json_dir = Path(__file__).parent / '../data/tmp'
@@ -53,7 +64,55 @@ def load_ffhq_data(path):
     image_paths = [os.path.join(path, image) for image in os.listdir(path) if Path(image).suffix == '.png']
     image_paths.sort()
     image_paths, labels = generate_ffhq_labels(image_paths)
-    return np.array(image_paths), np.array(labels, dtype=np.uint8)
+    return image_paths, labels
 
-if __name__ == '__main__':
-    image_paths, labels = load_ffhq_data('../data/ffhq/images256x256')
+def load_utk_face_data(path):
+    image_paths = [os.path.join(path, image) for image in os.listdir(path) if Path(image).suffix == '.jpg']
+    image_paths.sort()
+
+    labels = []
+    invalid_images = []
+
+    # If no serialized data, load images manually
+    for index, file_path in enumerate(image_paths):
+        filename = Path(file_path).name
+        if not filename.endswith('.jpg'):
+            continue
+
+        # Split the filename to extract age and gender
+        parts = filename.split('_')
+        if len(parts) < 4:
+            invalid_images.append(index)
+            continue
+
+        # Extract age and gender from filename
+        try:
+            age = int(parts[0])
+        except ValueError:
+            print(f"Age {parts[0]} is not a valid number. File '{filename}'")
+            invalid_images.append(index)
+            continue
+
+        try:
+            gender = int(parts[1])
+        except ValueError:
+            print(f"Gender {parts[1]} is not a valid number. File '{filename}'")
+            invalid_images.append(index)
+            continue
+
+        labels.append([1, age, gender])  # Label '1' for face images
+
+    # Remove invalid images
+    for invalid_image in invalid_images:
+        image_paths.pop(invalid_image)
+
+    return image_paths, labels
+
+def load_face_data(utk_face_path, ffhq_path):
+    images, labels = load_utk_face_data(utk_face_path)
+    ffhq_images, ffhq_labels = load_ffhq_data(ffhq_path)
+
+    append_list(images, ffhq_images)
+    append_list(labels, ffhq_labels)
+
+    return np.array(images), np.array(labels, dtype=np.uint8)
