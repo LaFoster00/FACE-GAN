@@ -1,3 +1,4 @@
+import argparse
 import os
 from types import SimpleNamespace
 
@@ -313,7 +314,7 @@ def show_generator_test(images, labels):
     print(test_labels)
 
 
-def train_and_evaluate_hyperparameters(hyperparameters, x, y, model_save_path):
+def train_and_evaluate_hyperparameters(hyperparameters, x, y, model_save_path, infer_previous_model, infer_finished_model):
     # Data information
     label_structure = ['face_output', 'age_output', 'gender_output']
 
@@ -329,7 +330,7 @@ def train_and_evaluate_hyperparameters(hyperparameters, x, y, model_save_path):
                                                                               test_size=0.5,
                                                                               random_state=random.randint(0, 20000))
 
-    if os.path.exists(model_save_path / "Face.keras"):
+    if infer_previous_model and os.path.exists(model_save_path / "Face.keras"):
         try:
             model = saving.load_model(model_save_path / "Face.keras")
             infer_images(
@@ -417,15 +418,13 @@ def train_and_evaluate_hyperparameters(hyperparameters, x, y, model_save_path):
     result = model.evaluate(x=test_generator)
     print(result)
 
-    model_save_path = Path("saved_models")
-    model_save_path.mkdir(parents=True, exist_ok=True)
+    model.save(model_save_path / "Face.keras")
 
-    model.save("saved_models/Face.keras")
+    if infer_finished_model:
+        model = saving.load_model(model_save_path / "Face.keras")
+        infer_images(DataGenerator(x, y, label_structure, batch_size=8, for_fitting=False, dim=hyperparameters.dim)[0], model)
 
-    model = saving.load_model(model_save_path / "Face.keras")
-    infer_images(DataGenerator(x, y, label_structure, batch_size=8, for_fitting=False, dim=hyperparameters.dim)[0], model)
-
-    with open('saved_models/training_history_dropout_face.csv', mode='w', newline='') as file:
+    with open(model_save_path / 'training_history_dropout_face.csv', mode='w', newline='') as file:
         writer = csv.writer(file)
         # Write header
         writer.writerow(history.history.keys())
@@ -433,22 +432,74 @@ def train_and_evaluate_hyperparameters(hyperparameters, x, y, model_save_path):
         writer.writerows(zip(*history.history.values()))
 
 
+def get_arg_parser():
+    parser = argparse.ArgumentParser(description='Training hyperparameters')
+
+    parser.add_argument('--epochs', type=int, default=20,
+                        help='Number of training epochs')
+
+    parser.add_argument('--batch-size', type=int, default=32,
+                        help='Training batch size')
+
+    parser.add_argument('--dim', nargs=2, type=int, default=[256, 256],
+                        help='Input dimensions (height, width)')
+
+    parser.add_argument('--learning-rate', type=float, default=3e-4,
+                        help='Learning rate')
+
+    parser.add_argument('--dropout-rate', type=float, default=0.25,
+                        help='Dropout rate')
+
+    parser.add_argument('--learning-rate-factor', type=float, default=0.9,
+                        help='Learning rate decay factor')
+
+    parser.add_argument('--model', type=str, default='efficientnet-b0',
+                        choices=['efficientnet-b0', 'efficientnet-b4',
+                                 'resnet50', 'resnet101', 'inception', 'mobilenet'],
+                        help='Model architecture')
+
+    parser.add_argument('--infer-previous-model', action='store_true', default=False,
+                        help='Run inference on 8 of images using the previously trained model, before training.')
+
+    parser.add_argument('--infer-finished-model', action='store_true', default=False,
+                        help='Run inference on 8 of images using the newly trained model, after training.')
+
+    return parser
+
+
 
 if __name__ == '__main__':
+    parser = get_arg_parser()
+    parser.print_usage()
+    args = parser.parse_args()
+
+
+    # Convert to SimpleNamespace if needed
     hyperparameters = SimpleNamespace(
-        epochs=5,
-        batch_size = 32,
-        dim = (256, 256),
-        learning_rate = 3e-4,
-        dropout_rate = 0.25,
-        learning_rate_factor = 0.9,
-        model = 'mobilenet', # [efficientnet-b0/b4, resnet50/101, inception, mobilenet
+        epochs=args.epochs,
+        batch_size=args.batch_size,
+        dim=tuple(args.dim),
+        learning_rate=args.learning_rate,
+        dropout_rate=args.dropout_rate,
+        learning_rate_factor=args.learning_rate_factor,
+        model=args.model
     )
+
+    print("\nRunning training with following hyperparameters:")
+    print(f"\tEpochs: {hyperparameters.epochs}")
+    print(f"\tBatch Size: {hyperparameters.batch_size}")
+    print(f"\tDimensions: {hyperparameters.dim}")
+    print(f"\tLearning Rate: {hyperparameters.learning_rate}")
+    print(f"\tDropout Rate: {hyperparameters.dropout_rate}")
+    print(f"\tLearning Rate Factor: {hyperparameters.learning_rate_factor}")
+    print(f"\tModel: {hyperparameters.model}")
+    print()
 
     # Save information
     model_save_path = Path("saved_models")
+    model_save_path.mkdir(parents=True, exist_ok=True)
 
     # Load data
     x, y = load_ffhq_data(Path(__file__).parent / '../data/ffhq/images256x256')
 
-    train_and_evaluate_hyperparameters(hyperparameters, x, y, model_save_path)
+    train_and_evaluate_hyperparameters(hyperparameters, x, y, model_save_path, args.infer_previous_model, args.infer_finished_model)
