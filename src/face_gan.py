@@ -1,6 +1,9 @@
 import os
+from types import SimpleNamespace
+
 import numpy as np
 from matplotlib import pyplot
+from numpy.f2py.auxfuncs import throw_error
 
 import wandb
 from keras import models, layers, applications, metrics, losses, optimizers, callbacks, saving, ops, utils, backend
@@ -55,7 +58,7 @@ class RandomGrayscale(layers.Layer):
         return config
 
 # Preprocessing pipeline that applies random data augmentations
-def preprocessing_pipeline(inputs):
+def preprocessing_pipeline(inputs, preprocessing):
     """
     Applies a sequence of random augmentations to the input images:
     - Random Zoom
@@ -71,6 +74,7 @@ def preprocessing_pipeline(inputs):
     x = layers.RandomBrightness(0.1)(x)
     x = layers.RandomContrast(0.1)(x)
     x = RandomGrayscale(probability=0.5)(x)
+    x = preprocessing(x)
     return x
 
 
@@ -150,7 +154,12 @@ def gender_metric(y_true, y_pred):
     return metrics.binary_accuracy(y_true, y_pred)
 
 
-def FaceIdentifier(input_shape=(256, 256, 3), dropout_rate=0.25):
+def FaceIdentifier(
+        input_shape=(256, 256, 3),
+        dropout_rate=0.25,
+        learning_rate=3e-4,
+        model='efficientnet-b0'
+):
     """
     Defines and compiles a multi-task model for face detection, age estimation, and gender classification.
 
@@ -163,12 +172,35 @@ def FaceIdentifier(input_shape=(256, 256, 3), dropout_rate=0.25):
     """
     inputs = layers.Input(shape=input_shape)
 
-    # Apply preprocessing pipeline (augmentations, etc.)
-    x = preprocessing_pipeline(inputs)
+    # Load pre-trained model with frozen weights
+    basemodel = None
+    preprocessing = None
+    match model:# [efficientnet-b0/b4, resnet50/101, inception, mobilenet
+        case 'efficientnet-b0':
+            basemodel = applications.efficientnet.EfficientNetB0(weights='imagenet', include_top=False)
+            preprocessing = applications.efficientnet.preprocess_input
+        case 'efficientnet-b4':
+            basemodel = applications.efficientnet.EfficientNetB4(weights='imagenet', include_top=False)
+            preprocessing = applications.efficientnet.preprocess_input
+        case 'resnet50':
+            basemodel = applications.ResNet50(weights='imagenet', include_top=False)
+            preprocessing = applications.resnet.preprocess_input
+        case 'resnet101':
+            basemodel = applications.ResNet101(weights='imagenet', include_top=False)
+            preprocessing = applications.resnet.preprocess_input
+        case 'inception':
+            basemodel = applications.InceptionV3(weights='imagenet', include_top=False)
+            preprocessing = applications.inception_v3.preprocess_input
+        case 'mobilenet':
+            basemodel = applications.MobileNetV2(weights='imagenet', include_top=False)
+            preprocessing = applications.mobilenet_v2.preprocess_input
 
-    # Load pre-trained EfficientNetB0 as the base model (frozen weights)
-    basemodel = applications.efficientnet.EfficientNetB4(weights='imagenet', include_top=False)
+    if basemodel is None:
+        raise Exception('Base model not defined.')
     basemodel.trainable = False
+
+    # Apply preprocessing pipeline (augmentations, etc.)
+    x = preprocessing_pipeline(inputs, preprocessing)
     x = basemodel(x)
 
     # Add global average pooling and batch normalization
@@ -181,13 +213,17 @@ def FaceIdentifier(input_shape=(256, 256, 3), dropout_rate=0.25):
 
     # Define age output branch (regression)
     age_output = layers.Dense(2024, activation='relu', name='age_1')(x)
+    age_output = layers.BatchNormalization()(age_output)
     age_output = layers.Dense(1024, activation='relu', name='age_2')(age_output)
+    age_output = layers.BatchNormalization()(age_output)
     age_output = layers.Dropout(rate=dropout_rate, name='age_dropout')(age_output)
     age_output = layers.Dense(1, activation='relu', name='age_output')(age_output)
 
     # Define gender output branch (multi-class classification)
     gender_output = layers.Dense(2024, activation='relu', name='gender_1')(x)
+    gender_output = layers.BatchNormalization()(gender_output)
     gender_output = layers.Dense(1024, activation='relu', name='gender_2')(gender_output)
+    gender_output = layers.BatchNormalization()(gender_output)
     gender_output = layers.Dropout(rate=dropout_rate, name='gender_dropout')(gender_output)
     gender_output = layers.Dense(1, activation='sigmoid', name='gender_output')(gender_output)
 
@@ -199,7 +235,7 @@ def FaceIdentifier(input_shape=(256, 256, 3), dropout_rate=0.25):
     # Compile the model with respective loss functions and metrics
     model.compile(
         run_eagerly=False,
-        optimizer=optimizers.Adam(learning_rate=3e-4),
+        optimizer=optimizers.Adam(learning_rate=learning_rate),
         loss={
             'face_output': losses.BinaryCrossentropy(),
             'age_output': age_loss_fn,
@@ -277,16 +313,9 @@ def show_generator_test(images, labels):
     print(test_labels)
 
 
-if __name__ == '__main__':
-    model_save_path = Path("saved_models")
-
-    batch_size = 32
-    preprocess = applications.efficientnet.preprocess_input
-    dim = (256, 256)
+def train_and_evaluate_hyperparameters(hyperparameters, x, y, model_save_path):
+    # Data information
     label_structure = ['face_output', 'age_output', 'gender_output']
-
-    # Load data
-    x, y = load_ffhq_data(Path(__file__).parent / '../data/ffhq/images256x256')
 
     # Step 1: Split data into training (80%) and test+validation (20%) sets
     x_train, x_temp, labels_train, labels_temp = model_selection.train_test_split(x,
@@ -303,34 +332,41 @@ if __name__ == '__main__':
     if os.path.exists(model_save_path / "Face.keras"):
         try:
             model = saving.load_model(model_save_path / "Face.keras")
-            infer_images(DataGenerator(x, y, label_structure, batch_size=8, for_fitting=False, prefetch_batches=1, dim=dim)[0], model)
+            infer_images(
+                DataGenerator(x, y, label_structure, batch_size=8, for_fitting=False, prefetch_batches=1, dim=hyperparameters.dim)[0],
+                model)
         except Exception as e:
             print(e)
 
     training_generator = DataGenerator(
-        image_paths = x_train,
-        labels = labels_train,
+        image_paths=x_train,
+        labels=labels_train,
         label_structure=label_structure,
-        batch_size=batch_size,
-        dim=dim)
+        batch_size=hyperparameters.batch_size,
+        dim=hyperparameters.dim)
 
     val_generator = DataGenerator(
         image_paths=x_val,
         labels=labels_val,
         label_structure=label_structure,
-        batch_size=batch_size,
-        dim=dim)
+        batch_size=hyperparameters.batch_size,
+        dim=hyperparameters.dim)
 
     test_generator = DataGenerator(
         image_paths=x_test,
         labels=labels_test,
         label_structure=label_structure,
-        batch_size=batch_size,
-        dim=dim)
+        batch_size=hyperparameters.batch_size,
+        dim=hyperparameters.dim)
 
     checkpoint_filepath = '/tmp/checkpoints/checkpoint.face.keras'
 
-    model = FaceIdentifier((*dim, 3), 0.25)
+    model = FaceIdentifier(
+        input_shape=(*hyperparameters.dim, 3),
+        dropout_rate=hyperparameters.dropout_rate,
+        learning_rate=hyperparameters.learning_rate,
+        model=hyperparameters.model,
+    )
     model.summary()
     # if os.path.exists(checkpoint_filepath):
     # model.load_weights(checkpoint_filepath)
@@ -352,28 +388,33 @@ if __name__ == '__main__':
         mode="min"
     ))
 
-
     def scheduler(epoch, lr):
-        return float(lr * ops.exp(-0.1))
-
+        return float(lr * hyperparameters.learning_rate_factor)
 
     model_callbacks.append(callbacks.LearningRateScheduler(scheduler))
 
     try:
-        wandb.init(config={'bs': 12})
+        wandb.init(
+            project="FACE-GAN",
+            config={
+                "epochs": hyperparameters.epochs,
+                "batch_size": hyperparameters.batch_size,
+                "start_learning_rate": hyperparameters.learning_rate,
+                "learning_rate_factor": hyperparameters.learning_rate_factor,
+                "dropout": hyperparameters.dropout_rate,
+                "base_model": hyperparameters.model,
+
+            })
         model_callbacks.append(WandbMetricsLogger())
     except Exception as e:
         print("No wandb callback added.")
-
 
     history = model.fit(x=training_generator,
                         validation_data=val_generator,
                         epochs=5,
                         callbacks=model_callbacks)
-    print(history)
 
     result = model.evaluate(x=test_generator)
-
     print(result)
 
     model_save_path = Path("saved_models")
@@ -381,13 +422,8 @@ if __name__ == '__main__':
 
     model.save("saved_models/Face.keras")
 
-    # Final evaluation on test set
-    results = model.evaluate(x=test_generator,
-                             return_dict=True)
-    print(results)
-
     model = saving.load_model(model_save_path / "Face.keras")
-    infer_images(DataGenerator(x, y, label_structure, batch_size=8, for_fitting=False, dim=dim)[0], model)
+    infer_images(DataGenerator(x, y, label_structure, batch_size=8, for_fitting=False, dim=hyperparameters.dim)[0], model)
 
     with open('saved_models/training_history_dropout_face.csv', mode='w', newline='') as file:
         writer = csv.writer(file)
@@ -396,4 +432,23 @@ if __name__ == '__main__':
         # Write data
         writer.writerows(zip(*history.history.values()))
 
-    #PlotHistory(history)
+
+
+if __name__ == '__main__':
+    hyperparameters = SimpleNamespace(
+        epochs=5,
+        batch_size = 32,
+        dim = (256, 256),
+        learning_rate = 3e-4,
+        dropout_rate = 0.25,
+        learning_rate_factor = 0.9,
+        model = 'mobilenet', # [efficientnet-b0/b4, resnet50/101, inception, mobilenet
+    )
+
+    # Save information
+    model_save_path = Path("saved_models")
+
+    # Load data
+    x, y = load_ffhq_data(Path(__file__).parent / '../data/ffhq/images256x256')
+
+    train_and_evaluate_hyperparameters(hyperparameters, x, y, model_save_path)
