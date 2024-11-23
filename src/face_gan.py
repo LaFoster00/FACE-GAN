@@ -110,7 +110,8 @@ def FaceIdentifier(
         input_shape=(256, 256, 3),
         dropout_rate=0.25,
         learning_rate=3e-4,
-        model='efficientnet-b0'
+        model='efficientnet-b0',
+        freeze_base=True
 ):
     """
     Defines and compiles a multi-task model for face detection, age estimation, and gender classification.
@@ -149,7 +150,7 @@ def FaceIdentifier(
 
     if basemodel is None:
         raise Exception('Base model not defined.')
-    basemodel.trainable = False
+    basemodel.trainable = not freeze_base
 
     # Apply preprocessing pipeline (augmentations, etc.)
     x = preprocessing_pipeline(inputs, preprocessing)
@@ -308,6 +309,7 @@ def train_and_evaluate_hyperparameters(hyperparameters, x, y, model_save_path, i
         dropout_rate=hyperparameters.dropout_rate,
         learning_rate=hyperparameters.learning_rate,
         model=hyperparameters.model,
+        freeze_base=hyperparameters.freeze_base
     )
     model.summary()
     # if os.path.exists(checkpoint_filepath):
@@ -345,7 +347,7 @@ def train_and_evaluate_hyperparameters(hyperparameters, x, y, model_save_path, i
                 "learning_rate_factor": hyperparameters.learning_rate_factor,
                 "dropout": hyperparameters.dropout_rate,
                 "base_model": hyperparameters.model,
-
+                "freeze_base": hyperparameters.freeze_base,
             })
         model_callbacks.append(WandbMetricsLogger())
     except Exception as e:
@@ -353,7 +355,7 @@ def train_and_evaluate_hyperparameters(hyperparameters, x, y, model_save_path, i
 
     history = model.fit(x=training_generator,
                         validation_data=val_generator,
-                        epochs=5,
+                        epochs=hyperparameters.epochs,
                         callbacks=model_callbacks)
 
     result = model.evaluate(x=test_generator)
@@ -399,6 +401,9 @@ def get_arg_parser():
                                  'resnet50', 'resnet101', 'inception', 'mobilenet'],
                         help='Model architecture')
 
+    parser.add_argument('--freeze-base', type=bool, default=True,
+                        help='Freeze the base model for training.')
+
     parser.add_argument('--infer-previous-model', action='store_true', default=False,
                         help='Run inference on 8 of images using the previously trained model, before training.')
 
@@ -423,7 +428,8 @@ if __name__ == '__main__':
         learning_rate=args.learning_rate,
         dropout_rate=args.dropout_rate,
         learning_rate_factor=args.learning_rate_factor,
-        model=args.model
+        model=args.model,
+        freeze_base=args.freeze_base,
     )
 
     print("\nRunning training with following hyperparameters:")
@@ -434,6 +440,7 @@ if __name__ == '__main__':
     print(f"\tDropout Rate: {hyperparameters.dropout_rate}")
     print(f"\tLearning Rate Factor: {hyperparameters.learning_rate_factor}")
     print(f"\tModel: {hyperparameters.model}")
+    print(f"\tFreeze Base Model: {hyperparameters.freeze_base}")
     print()
 
     # Save information
@@ -442,7 +449,8 @@ if __name__ == '__main__':
 
     # Load data
     x, y = load_face_data(
-        Path(__file__).parent / '../data/utk-face',
-        Path(__file__).parent / '../data/ffhq/images256x256')
+        Path(__file__).parent / '../data/utk-face/UTKFace',
+        Path(__file__).parent / '../data/ffhq/images256x256',
+    )
 
     train_and_evaluate_hyperparameters(hyperparameters, x, y, model_save_path, args.infer_previous_model, args.infer_finished_model)
