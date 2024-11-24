@@ -1,10 +1,15 @@
-keras==3.6.0
+tensorflow==2.16.1
 tensorflow-docs
 ipython==8.29.0
+keras==3.6.0
 numpy==1.26.4
 scikit-learn~=1.5.2
-opencv-python
 
 matplotlib==3.9.2
 
 wandb~=0.18.7
+imageio~=2.36.0
+kagglehub~=0.3.4
+scipy~=1.14.1
+opencv-python
+gdown
