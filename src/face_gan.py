@@ -454,6 +454,7 @@ if __name__ == '__main__':
     x, y = load_face_data(
         Path(__file__).parent / '../data/utk-face/UTKFace',
         Path(__file__).parent / '../data/ffhq/images256x256',
+        with_ffhq=False,
     )
 
     train_and_evaluate_hyperparameters(hyperparameters, x, y, model_save_path, args.infer_previous_model, args.infer_finished_model)

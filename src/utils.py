@@ -108,8 +108,11 @@ def load_utk_face_data(path):
 
     return image_paths, labels
 
-def load_face_data(utk_face_path, ffhq_path, with_utk = True):
-    images, labels = load_ffhq_data(ffhq_path)
+def load_face_data(utk_face_path, ffhq_path, with_ffhq = True, with_utk = True):
+    if with_ffhq:
+        images, labels = load_ffhq_data(ffhq_path)
+    else:
+        images, labels = [], []
 
     if with_utk:
         utk_images, utk_labels = load_utk_face_data(utk_face_path)
