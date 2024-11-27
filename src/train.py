@@ -9,10 +9,10 @@ import random
 import csv
 from pathlib import Path
 
-from utils import load_face_data
+from utils import load_face_data, GeneratorTestCallback
 from data_generator import DataGenerator
 
-from discriminator import get_discriminator
+from discriminator import get_discriminator, discriminator_loss
 from generator import get_generator
 from face_gan import FaceGAN
 
@@ -61,7 +61,7 @@ def train_and_evaluate_hyperparameters(hyperparameters, x, y, model_save_path, i
     num_channels = 3
 
     generator_in_channels = hyperparameters.latent_dim + num_classes
-    discriminator_in_channels = num_channels + num_classes
+    discriminator_in_channels = num_channels
     print(generator_in_channels, discriminator_in_channels)
 
     generator = get_generator(
@@ -85,10 +85,10 @@ def train_and_evaluate_hyperparameters(hyperparameters, x, y, model_save_path, i
     )
 
     model.compile(
-        run_eagerly=True,
+        run_eagerly=False,
         d_optimizer=optimizers.Adam(learning_rate=hyperparameters.learning_rate),
         g_optimizer=optimizers.Adam(learning_rate=hyperparameters.learning_rate),
-        loss_fn=losses.BinaryCrossentropy(from_logits=False), )
+        loss_fn=discriminator_loss)
     model.summary()
 
     model_callbacks = []
@@ -113,6 +113,8 @@ def train_and_evaluate_hyperparameters(hyperparameters, x, y, model_save_path, i
 
     model_callbacks.append(callbacks.LearningRateScheduler(scheduler))
 
+    model_callbacks.append(GeneratorTestCallback(hyperparameters.latent_dim))
+
     try:
         if False:
             wandb.init(
@@ -131,14 +133,18 @@ def train_and_evaluate_hyperparameters(hyperparameters, x, y, model_save_path, i
         print("No wandb callback added.")
 
     history = model.fit(x=training_generator,
-                        validation_data=val_generator,
+                        #validation_data=val_generator,
                         epochs=hyperparameters.epochs,
                         callbacks=model_callbacks)
 
     result = model.evaluate(x=test_generator)
     print(result)
 
-    model.save(model_save_path / "FaceGAN.keras")
+    generator = model.generator
+    generator.save(model_save_path / "FaceGAN-Generator.keras")
+
+    discriminator = model.discriminator
+    discriminator.save(model_save_path / "FaceGAN-Discriminator.keras")
 
     with open(model_save_path / 'training_history_facegan.csv', mode='w', newline='') as file:
         writer = csv.writer(file)

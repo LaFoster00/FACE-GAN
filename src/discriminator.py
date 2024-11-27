@@ -16,7 +16,7 @@ Key Features:
 
 # Custom loss and metric functions for the age and gender tasks.
 @keras.saving.register_keras_serializable()
-def age_loss_fn(y_true, y_pred):
+def age_loss_fn(real_true, age_true, age_pred):
     """
     Custom loss function for age prediction. It computes Mean Squared Error only for valid age values (age < 200).
 
@@ -27,9 +27,9 @@ def age_loss_fn(y_true, y_pred):
     Returns:
     - loss: Mean squared error between true and predicted ages for valid entries.
     """
-    y_pred = y_pred * ops.cast(ops.less(y_true, 200), y_pred.dtype)  # Mask invalid age values (>= 200)
-    y_true = y_true * ops.cast(ops.less(y_true, 200), y_true.dtype)
-    return losses.mean_squared_error(y_true, y_pred)
+    age_pred = age_pred * ops.cast(ops.equal(real_true, 0), age_pred.dtype)  # Mask invalid age values (>= 200)
+    age_true = age_true * ops.cast(ops.equal(real_true, 0), age_true.dtype)
+    return losses.mean_squared_error(age_true, age_pred)
 
 
 @keras.saving.register_keras_serializable()
@@ -53,7 +53,7 @@ def age_metric(y_true, y_pred):
 
 
 @keras.saving.register_keras_serializable()
-def gender_loss_fn(y_true, y_pred):
+def gender_loss_fn(real_true, gender_true, gender_pred):
     """
     Custom loss function for gender prediction. It computes Binary Cross-Entropy only for valid gender labels.
 
@@ -64,9 +64,9 @@ def gender_loss_fn(y_true, y_pred):
     Returns:
     - loss: Binary cross-entropy between true and predicted gender labels.
     """
-    y_pred = y_pred * ops.cast(ops.less(y_true, 2), y_pred.dtype)  # Mask invalid gender values (>= 2)
-    y_true = y_true * ops.cast(ops.less(y_true, 2), y_true.dtype)
-    return losses.binary_crossentropy(y_true, y_pred)
+    gender_pred = gender_pred * ops.cast(ops.equal(real_true, 0), gender_pred.dtype)  # Mask invalid gender values (>= 2)
+    gender_true = gender_true * ops.cast(ops.equal(real_true, 0), gender_true.dtype)
+    return losses.binary_crossentropy(gender_true, gender_pred)
 
 
 @keras.saving.register_keras_serializable()
@@ -189,3 +189,19 @@ def compile_discriminator(discriminator, learning_rate):
             'age_output': age_metric,
             'gender_output': gender_metric,
         })
+
+def discriminator_loss(y_true, y_pred):
+    real_true = y_true[:, 0, 0]
+    age_true = y_true[:, 0, 1]
+    gender_true = y_true[:, 0, 2]
+
+    real_pred = y_pred['real_output'][:, 0]
+    age_pred = y_pred['age_output'][:, 0]
+    gender_pred = y_pred['gender_output'][:, 0]
+
+    real_loss = ops.mean(losses.binary_crossentropy(real_true, real_pred))
+    age_loss = ops.mean(age_loss_fn(real_true, age_true, age_pred))
+    gender_loss = ops.mean(gender_loss_fn(real_true, gender_true, gender_pred))
+
+    return ops.sum([real_loss, age_loss, gender_loss])
+

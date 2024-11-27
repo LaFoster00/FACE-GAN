@@ -56,19 +56,17 @@ class FaceGAN(models.Model):
         # Decode the noise (guided by labels) to fake images.
         generated_images = self.generator(random_vector_labels)
 
-        # Combine them with real images. Note that we are concatenating the labels
-        # with these images here.
-        fake_image_and_labels = ops.concatenate(
-            [generated_images, image_labels], axis=-1
-        )
-        real_image_and_labels = ops.concatenate([real_images, image_labels], -1)
         combined_images = ops.concatenate(
-            [fake_image_and_labels, real_image_and_labels], axis=0
+            [generated_images, real_images], axis=0
         )
 
         # Assemble labels discriminating real from fake images.
         real_fake_labels = ops.concatenate(
-            [ops.ones((batch_size, 1)), ops.zeros((batch_size, 1))], axis=0
+            [
+                ops.stack([ops.ones((batch_size, 1)), ops.expand_dims(age_labels, axis=-1), ops.expand_dims(gender_labels, axis=-1)], axis=-1),
+                ops.stack([ops.zeros((batch_size, 1)),  ops.expand_dims(age_labels, axis=-1), ops.expand_dims(gender_labels, axis=-1)], axis=-1)
+            ],
+            axis=0
         )
 
         # Train the discriminator.
@@ -89,16 +87,13 @@ class FaceGAN(models.Model):
         )
 
         # Assemble labels that say "all real images".
-        misleading_labels = ops.zeros((batch_size, 1))
+        misleading_labels = ops.stack([ops.zeros((batch_size, 1)),  ops.expand_dims(age_labels, axis=-1), ops.expand_dims(gender_labels, axis=-1)], axis=-1)
 
         # Train the generator (note that we should *not* update the weights
         # of the discriminator)!
         with tf.GradientTape() as tape:
             fake_images = self.generator(random_vector_labels)
-            fake_image_and_labels = ops.concatenate(
-                [fake_images, image_labels], -1
-            )
-            predictions = self.discriminator(fake_image_and_labels)
+            predictions = self.discriminator(fake_images)
             g_loss = self.loss_fn(misleading_labels, predictions)
         grads = tape.gradient(g_loss, self.generator.trainable_weights)
         self.g_optimizer.apply_gradients(zip(grads, self.generator.trainable_weights))

@@ -1,8 +1,12 @@
 import json
 import pickle
+import random
 from pathlib import Path
 import os
 import numpy as np
+from keras import callbacks, models, ops
+import keras
+import matplotlib.pyplot as plt
 
 def append_list(a, b):
     """
@@ -121,3 +125,25 @@ def load_face_data(utk_face_path, ffhq_path, with_ffhq = True, with_utk = True):
         append_list(labels, utk_labels)
 
     return np.array(images), np.array(labels, dtype=np.uint8)
+
+def getGeneratorInputData(latent_dim, age=None, gender=None, numImages=1):
+    data = []
+    for i in range(numImages):
+        noise = keras.random.normal(shape=(latent_dim,))
+        noise_and_labels = ops.concatenate([noise, [age], [gender]])
+        data.append(noise_and_labels)
+
+    return np.array(data)
+
+
+class GeneratorTestCallback(callbacks.Callback):
+    def __init__(self, latent_dim):
+        super().__init__()
+        self.latent_dim = latent_dim
+
+    def on_epoch_end(self, epoch, logs=None):
+        generator : models.Model = self.model.generator
+        results = generator.predict(getGeneratorInputData(self.latent_dim, random.randint(0, 100), random.randint(0, 1)))
+        for result in results:
+            plt.imshow(result)
+            plt.show()
