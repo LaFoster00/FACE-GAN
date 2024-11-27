@@ -19,5 +19,6 @@ def get_generator(num_channels, image_dim):
 
     model = models.Model(inputs=input, outputs=x)
     model.name = "generator"
+    model.summary()
 
     return model

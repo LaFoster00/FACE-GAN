@@ -13,12 +13,12 @@ class FaceGAN(models.Model):
         self.latent_dim = latent_dim
         self.num_classes = num_classes
         self.seed_generator = random.SeedGenerator(1337)
-        self.gen_loss_tracker = metrics.Mean(name="generator_loss")
-        self.disc_loss_tracker = metrics.Mean(name="discriminator_loss")
+        self.g_loss_metric = metrics.Mean(name="g_loss")
+        self.d_loss_metric = metrics.Mean(name="d_loss")
 
     @property
     def metrics(self):
-        return [self.gen_loss_tracker, self.disc_loss_tracker]
+        return [self.g_loss_metric, self.d_loss_metric]
 
     def compile(self, d_optimizer, g_optimizer, loss_fn, run_eagerly=False):
         super().compile(run_eagerly=run_eagerly)
@@ -29,90 +29,56 @@ class FaceGAN(models.Model):
     def train_step(self, data):
         # Unpack the data.
         real_images, labels = data
+        batch_size = ops.shape(real_images)[0]
 
-        age_labels = labels['age_output']
-        gender_labels = labels['gender_output']
-        labels = ops.stack([age_labels, gender_labels], axis=-1)
-        stacked_labels = ops.stack([age_labels, gender_labels], axis=-1)
-
-        # Add dummy dimensions to the labels so that they can be concatenated with
-        # the images. This is for the discriminator.
-        image_labels = labels[:, :, None, None]
-        image_labels = ops.repeat(
-            image_labels, repeats=[self.image_dim * self.image_dim]
-        )
-        image_labels = ops.reshape(
-            image_labels, (-1, self.image_dim, self.image_dim, self.num_classes)
-        )
-
-        # Sample random points in the latent space and concatenate the labels.
-        # This is for the generator.
+        # Sample random points in the latent space
         batch_size = ops.shape(real_images)[0]
         random_latent_vectors = random.normal(
             shape=(batch_size, self.latent_dim), seed=self.seed_generator
         )
-        random_vector_labels = ops.concatenate(
-            [random_latent_vectors, labels], axis=1
+
+        # Decode them to fake images
+        generated_images = self.generator(random_latent_vectors)
+
+        # Combine them with real images
+        combined_images = ops.concatenate([real_images, generated_images], axis=0)
+
+        # Assemble labels discriminating real from fake images
+        labels = ops.concatenate(
+            [ops.ones((batch_size, 1)), ops.zeros((batch_size, 1))], axis=0
         )
-
-        # Decode the noise (guided by labels) to fake images.
-        generated_images = self.generator(random_vector_labels)
-
-        combined_images = ops.concatenate(
-            [real_images, generated_images], axis=0
-        )
-
-        # Assemble labels discriminating real from fake images.
-        real_fake_labels = ops.concatenate(
-            [
-                ops.ones((batch_size, 1)),
-                ops.zeros((batch_size, 1))
-            ],
-            axis=0
-        )
-
         # Add random noise to the labels - important trick!
-        real_fake_labels += 0.05 * random.uniform(ops.shape(real_fake_labels))
-        real_fake_labels = ops.clip(real_fake_labels, 0, 1)
+        labels += 0.05 * random.uniform(ops.shape(labels))
 
-        all_labels = ops.repeat(stacked_labels, repeats=2, axis=0)
-        real_fake_labels = ops.concatenate(
-            [real_fake_labels, all_labels]
-            , axis=-1)
-
-        # Train the discriminator.
+        # Train the discriminator
         with tf.GradientTape() as tape:
             predictions = self.discriminator(combined_images)
-            d_loss = self.loss_fn(real_fake_labels, predictions)
+            d_loss = self.loss_fn(labels, predictions)
         grads = tape.gradient(d_loss, self.discriminator.trainable_weights)
         self.d_optimizer.apply_gradients(
             zip(grads, self.discriminator.trainable_weights)
         )
 
-        # Sample random points in the latent space.
+        # Sample random points in the latent space
         random_latent_vectors = random.normal(
             shape=(batch_size, self.latent_dim), seed=self.seed_generator
         )
-        random_vector_labels = ops.concatenate(
-            [random_latent_vectors, labels], axis=1
-        )
 
-        # Assemble labels that say "all real images".
-        misleading_labels = ops.concatenate([ops.ones((batch_size, 1)), stacked_labels], axis=-1)
+        # Assemble labels that say "all real images"
+        misleading_labels = ops.ones((batch_size, 1))
 
         # Train the generator (note that we should *not* update the weights
         # of the discriminator)!
         with tf.GradientTape() as tape:
-            fake_images = self.generator(random_vector_labels)
-            predictions = self.discriminator(fake_images)
+            predictions = self.discriminator(self.generator(random_latent_vectors))
             g_loss = self.loss_fn(misleading_labels, predictions)
         grads = tape.gradient(g_loss, self.generator.trainable_weights)
         self.g_optimizer.apply_gradients(zip(grads, self.generator.trainable_weights))
 
-        # Monitor loss.
-        self.gen_loss_tracker.update_state(g_loss)
-        self.disc_loss_tracker.update_state(d_loss)
+        # Update metrics
+        self.d_loss_metric.update_state(d_loss)
+        self.g_loss_metric.update_state(g_loss)
         return {
-            "g_loss": self.gen_loss_tracker.result(),
-            "d_loss": self.disc_loss_tracker.result(),
+            "d_loss": self.d_loss_metric.result(),
+            "g_loss": self.g_loss_metric.result(),
         }

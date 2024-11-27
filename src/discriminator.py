@@ -1,5 +1,7 @@
 from keras import models, layers, applications, metrics, losses, optimizers, callbacks, saving, ops, utils, backend
 import keras
+from keras.src.layers import LeakyReLU
+from keras.src.ops import BinaryCrossentropy
 
 from layers import preprocessing_pipeline
 
@@ -89,88 +91,32 @@ def gender_metric(y_true, y_pred):
     y_true = ops.where(mask, y_true, ops.zeros_like(y_true))
     return metrics.binary_accuracy(y_true, y_pred)
 
+def discriminator_preprocessing(inputs):
+    return inputs / 255.0
+
 def get_discriminator(
-        input_shape=(256, 256, 3),
+        input_shape,
         dropout_rate=0.25,
         model='efficientnet-b0',
         freeze_base=True
 ):
-    """
-    Defines and compiles a multi-task model for face detection, age estimation, and gender classification.
-
-    Args:
-    - input_shape: Shape of the input images (default: (128, 128, 3)).
-    - dropout_rate: Dropout rate for regularization (default: 0.25).
-
-    Returns:
-    - model: Compiled Keras model for face identification, age, and gender prediction.
-    """
     inputs = layers.Input(shape=input_shape)
 
-    # Load pre-trained model with frozen weights
-    basemodel = None
-    preprocessing = None
-
-    if model == 'efficientnet-b0':
-        basemodel = applications.efficientnet.EfficientNetB0(weights='imagenet', include_top=False)
-        preprocessing = applications.efficientnet.preprocess_input
-    elif model == 'efficientnet-b4':
-        basemodel = applications.efficientnet.EfficientNetB4(weights='imagenet', include_top=False)
-        preprocessing = applications.efficientnet.preprocess_input
-    elif model == 'resnet50':
-        basemodel = applications.ResNet50(weights='imagenet', include_top=False)
-        preprocessing = applications.resnet.preprocess_input
-    elif model == 'resnet101':
-        basemodel = applications.ResNet101(weights='imagenet', include_top=False)
-        preprocessing = applications.resnet.preprocess_input
-    elif model == 'inception':
-        basemodel = applications.InceptionV3(weights='imagenet', include_top=False)
-        preprocessing = applications.inception_v3.preprocess_input
-    elif model == 'mobilenet':
-        basemodel = applications.MobileNetV2(weights='imagenet', include_top=False)
-        preprocessing = applications.mobilenet_v2.preprocess_input
-    else:
-        raise ValueError("Unsupported model type specified.")
-
-    if basemodel is None:
-        raise Exception('Base model not defined.')
-    basemodel.trainable = not freeze_base
-
-    # Apply preprocessing pipeline (augmentations, etc.)
-    x = preprocessing_pipeline(inputs, preprocessing)
-    x = basemodel(x)
-
-    # Add global average pooling and batch normalization
-    x = layers.GlobalAveragePooling2D()(x)
-    x = layers.BatchNormalization()(x)
-
-    # Define image real branch (binary)
-    real_output = layers.Dropout(dropout_rate)(x)
-    real_output = layers.Dense(1, activation='sigmoid')(real_output)
-
-    # Define age output branch (regression)
-    age_output = layers.Dense(256, activation='relu', name='age_1')(x)
-    age_output = layers.BatchNormalization()(age_output)
-    age_output = layers.Dense(128, activation='relu', name='age_2')(age_output)
-    age_output = layers.BatchNormalization()(age_output)
-    age_output = layers.Dropout(rate=dropout_rate, name='age_dropout')(age_output)
-    age_output = layers.Dense(1, activation='relu', name='age_output')(age_output)
-
-    # Define gender output branch (multi-class classification)
-    gender_output = layers.Dense(256, activation='relu', name='gender_1')(x)
-    gender_output = layers.BatchNormalization()(gender_output)
-    gender_output = layers.Dense(128, activation='relu', name='gender_2')(gender_output)
-    gender_output = layers.BatchNormalization()(gender_output)
-    gender_output = layers.Dropout(rate=dropout_rate, name='gender_dropout')(gender_output)
-    gender_output = layers.Dense(1, activation='sigmoid', name='gender_output')(gender_output)
+    x = layers.Conv2D(input_shape[0], kernel_size=4, strides=2, padding="same")(inputs)
+    x = layers.LeakyReLU(negative_slope=0.2)(x)
+    x = layers.Conv2D(input_shape[0] * 2, kernel_size=4, strides=2, padding="same")(x)
+    x = layers.LeakyReLU(negative_slope=0.2)(x)
+    x = layers.Conv2D(input_shape[0] * 2, kernel_size=4, strides=2, padding="same")(x)
+    x = layers.LeakyReLU(negative_slope=0.2)(x)
+    x = layers.Flatten()(x)
+    x = layers.Dropout(0.2)(x)
+    x = layers.Dense(1, activation="sigmoid")(x)
 
     # Combine all branches into a final model
     model = models.Model(inputs=inputs,
-                         outputs=
-                         {'real_output': real_output,
-                          'age_output': age_output,
-                          'gender_output': gender_output})
+                         outputs=x)
     model.name = 'discriminator'
+    model.summary()
 
     return model
 
@@ -190,17 +136,5 @@ def compile_discriminator(discriminator, learning_rate):
         })
 
 def discriminator_loss(y_true, y_pred):
-    real_true = y_true[:, 0]
-    age_true = y_true[:, 1]
-    gender_true = y_true[:, 2]
-
-    real_pred = y_pred['real_output'][:, 0]
-    age_pred = y_pred['age_output'][:, 0]
-    gender_pred = y_pred['gender_output'][:, 0]
-
-    real_loss = ops.mean(losses.binary_crossentropy(real_true, real_pred)) * 100
-    age_loss = ops.mean(age_loss_fn(real_true, age_true, age_pred)) * 0.01
-    gender_loss = ops.mean(gender_loss_fn(real_true, gender_true, gender_pred)) * 10
-
-    return ops.sum([real_loss, age_loss, gender_loss])
+    return losses.binary_crossentropy(y_true, y_pred)
 

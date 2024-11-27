@@ -34,7 +34,7 @@ def train_and_evaluate_hyperparameters(hyperparameters, x, y, model_save_path, i
     num_classes = len(label_structure)
     num_channels = 3
 
-    generator_in_channels = hyperparameters.latent_dim + num_classes
+    generator_in_channels = hyperparameters.latent_dim
     discriminator_in_channels = num_channels
     print(generator_in_channels, discriminator_in_channels)
 
@@ -103,7 +103,6 @@ def train_and_evaluate_hyperparameters(hyperparameters, x, y, model_save_path, i
     history = model.fit(x=data_generator,
                         epochs=hyperparameters.epochs,
                         callbacks=model_callbacks)
-    print(result)
 
     generator = model.generator
     generator.save(model_save_path / "FaceGAN-Generator.keras")
@@ -125,16 +124,16 @@ def get_arg_parser():
     parser.add_argument('--epochs', type=int, default=20,
                         help='Number of training epochs')
 
-    parser.add_argument('--batch-size', type=int, default=32,
+    parser.add_argument('--batch-size', type=int, default=64,
                         help='Training batch size')
 
-    parser.add_argument('--image_dim', type=int, default=128,
+    parser.add_argument('--image_dim', type=int, default=64,
                         help='Image dimensions (height, width)')
 
-    parser.add_argument('--latent_dim', type=int, default=256,
+    parser.add_argument('--latent_dim', type=int, default=128,
                         help='Generator input size (height, width)')
 
-    parser.add_argument('--learning-rate', type=float, default=3e-4,
+    parser.add_argument('--learning-rate', type=float, default=1e-4,
                         help='Learning rate')
 
     parser.add_argument('--dropout-rate', type=float, default=0.25,
@@ -198,7 +197,8 @@ if __name__ == '__main__':
     x, y = load_face_data(
         Path(__file__).parent / '../data/utk-face/UTKFace',
         Path(__file__).parent / '../data/ffhq/images256x256',
-        with_ffhq=False,
+        with_ffhq=True,
+        with_utk=False
     )
 
     train_and_evaluate_hyperparameters(hyperparameters, x, y, model_save_path, args.infer_previous_model,

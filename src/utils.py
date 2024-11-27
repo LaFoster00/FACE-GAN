@@ -141,6 +141,13 @@ def getGeneratorInputData(latent_dim, age=None, gender=None, numImages=1):
 
     return np.array(data)
 
+def getGeneratorSimpleData(latent_dim, nunImages=1):
+    data = []
+    for i in range(nunImages):
+        noise = keras.random.normal(shape=(latent_dim,))
+        data.append(noise)
+    return np.array(data)
+
 
 class GeneratorTestCallback(callbacks.Callback):
     def __init__(self, latent_dim):
@@ -149,8 +156,9 @@ class GeneratorTestCallback(callbacks.Callback):
 
     def on_epoch_end(self, epoch, logs=None):
         generator : models.Model = self.model.generator
-        results = generator.predict(getGeneratorInputData(self.latent_dim, random.randint(0, 100), random.randint(0, 1)))
+        results = generator.predict(getGeneratorSimpleData(self.latent_dim))
         for result in results:
+            plt.axis('off')
             plt.imshow(result)
             plt.show()
         try:

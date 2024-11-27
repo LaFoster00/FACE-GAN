@@ -8,6 +8,7 @@ import threading
 import queue
 from multiprocessing import cpu_count
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from discriminator import discriminator_preprocessing
 
 import pickle
 
@@ -16,6 +17,7 @@ class DataGenerator(utils.Sequence):
                  image_paths,
                  labels,
                  label_structure,
+                 preprocess_fun=discriminator_preprocessing,
                  for_fitting=True,
                  batch_size=32,
                  shuffle=True,
@@ -31,6 +33,7 @@ class DataGenerator(utils.Sequence):
         self.batch_size = batch_size
         self.shuffle = shuffle
         self.dim = dim
+        self.preprocess_fun = preprocess_fun
         if self.shuffle:
             np.random.shuffle(self.indices)
 
@@ -160,7 +163,16 @@ class DataGenerator(utils.Sequence):
 
     def _load_image(self, image_path, index):
         """Load and preprocess single image"""
-        return utils.img_to_array(utils.load_img(image_path, target_size=(self.dim, self.dim), interpolation="lanczos"), dtype='uint8'), index
+        image, index = utils.img_to_array(
+            utils.load_img(
+                image_path,
+                target_size=(self.dim, self.dim),
+                interpolation="lanczos"),
+            dtype='float32'), index
+        if self.preprocess_fun is None:
+            return image, index
+        else:
+            return self.preprocess_fun(image), index
 
     def __del__(self):
         """Clean up resources"""
