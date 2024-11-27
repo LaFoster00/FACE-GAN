@@ -39,26 +39,26 @@ def train_and_evaluate_hyperparameters(hyperparameters, x, y, model_save_path, i
         labels=labels_train,
         label_structure=label_structure,
         batch_size=hyperparameters.batch_size,
-        dim=hyperparameters.dim)
+        dim=hyperparameters.image_dim)
 
     val_generator = DataGenerator(
         image_paths=x_val,
         labels=labels_val,
         label_structure=label_structure,
         batch_size=hyperparameters.batch_size,
-        dim=hyperparameters.dim)
+        dim=hyperparameters.image_dim)
 
     test_generator = DataGenerator(
         image_paths=x_test,
         labels=labels_test,
         label_structure=label_structure,
         batch_size=hyperparameters.batch_size,
-        dim=hyperparameters.dim)
+        dim=hyperparameters.image_dim)
 
     checkpoint_filepath = '/tmp/checkpoints/checkpoint.face.keras'
 
     discriminator = get_discriminator(
-        input_shape=(*hyperparameters.dim, 3),
+        input_shape=(hyperparameters.image_dim, hyperparameters.image_dim, 3),
         dropout_rate=hyperparameters.dropout_rate,
         model=hyperparameters.model,
         freeze_base=hyperparameters.freeze_base
@@ -137,8 +137,11 @@ def get_arg_parser():
     parser.add_argument('--batch-size', type=int, default=32,
                         help='Training batch size')
 
-    parser.add_argument('--dim', nargs=2, type=int, default=[256, 256],
-                        help='Input dimensions (height, width)')
+    parser.add_argument('--image_dim', type=int, default=128,
+                        help='Image dimensions (height, width)')
+
+    parser.add_argument('--latent_dim', type=int, default=256,
+                        help='Generator input size (height, width)')
 
     parser.add_argument('--learning-rate', type=float, default=3e-4,
                         help='Learning rate')
@@ -177,7 +180,8 @@ if __name__ == '__main__':
     hyperparameters = SimpleNamespace(
         epochs=args.epochs,
         batch_size=args.batch_size,
-        dim=tuple(args.dim),
+        image_dim=args.image_dim,
+        latent_dim=args.latent_dim,
         learning_rate=args.learning_rate,
         dropout_rate=args.dropout_rate,
         learning_rate_factor=args.learning_rate_factor,
@@ -188,7 +192,8 @@ if __name__ == '__main__':
     print("\nRunning training with following hyperparameters:")
     print(f"\tEpochs: {hyperparameters.epochs}")
     print(f"\tBatch Size: {hyperparameters.batch_size}")
-    print(f"\tDimensions: {hyperparameters.dim}")
+    print(f"\tImage Dimensions: {hyperparameters.image_dim}")
+    print(f"\tLatent Dimensions: {hyperparameters.latent_dim}")
     print(f"\tLearning Rate: {hyperparameters.learning_rate}")
     print(f"\tDropout Rate: {hyperparameters.dropout_rate}")
     print(f"\tLearning Rate Factor: {hyperparameters.learning_rate_factor}")

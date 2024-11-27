@@ -21,7 +21,7 @@ class DataGenerator(utils.Sequence):
                  shuffle=True,
                  prefetch_batches=64,
                  max_workers=None,
-                 dim=(224, 224)):
+                 dim=224):
         super().__init__()
         self.image_paths = image_paths
         self.labels = labels
@@ -160,7 +160,7 @@ class DataGenerator(utils.Sequence):
 
     def _load_image(self, image_path, index):
         """Load and preprocess single image"""
-        return utils.img_to_array(utils.load_img(image_path, target_size=self.dim, interpolation="lanczos"), dtype='uint8'), index
+        return utils.img_to_array(utils.load_img(image_path, target_size=(self.dim, self.dim), interpolation="lanczos"), dtype='uint8'), index
 
     def __del__(self):
         """Clean up resources"""
