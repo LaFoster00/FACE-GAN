@@ -100,23 +100,15 @@ def train_and_evaluate_hyperparameters(hyperparameters, x, y, model_save_path, i
         save_best_only=True
     ))
 
-    model_callbacks.append(callbacks.EarlyStopping(
-        monitor='val_loss',
-        min_delta=0.001,
-        patience=5,
-        restore_best_weights=True,
-        mode="min"
-    ))
-
     def scheduler(epoch, lr):
         return float(lr * hyperparameters.learning_rate_factor)
 
-    model_callbacks.append(callbacks.LearningRateScheduler(scheduler))
+    #model_callbacks.append(callbacks.LearningRateScheduler(scheduler))
 
     model_callbacks.append(GeneratorTestCallback(hyperparameters.latent_dim))
 
     try:
-        if False:
+        if True:
             wandb.init(
                 project="FACE-GAN",
                 config={
@@ -127,6 +119,8 @@ def train_and_evaluate_hyperparameters(hyperparameters, x, y, model_save_path, i
                     "dropout": hyperparameters.dropout_rate,
                     "base_model": hyperparameters.model,
                     "freeze_base": hyperparameters.freeze_base,
+                    "image_dim": hyperparameters.image_dim,
+                    "latent_dim": hyperparameters.latent_dim,
                 })
             model_callbacks.append(WandbMetricsLogger())
     except Exception as e:

@@ -7,6 +7,7 @@ import numpy as np
 from keras import callbacks, models, ops
 import keras
 import matplotlib.pyplot as plt
+import wandb
 
 def append_list(a, b):
     """
@@ -152,3 +153,10 @@ class GeneratorTestCallback(callbacks.Callback):
         for result in results:
             plt.imshow(result)
             plt.show()
+        try:
+            wandb.log({
+                'generator_images': [wandb.Image(img, caption=f'Image {i} from epoch {epoch}')
+                                     for i, img in enumerate(results)]
+            })
+        except Exception:
+            pass
