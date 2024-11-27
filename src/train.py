@@ -1,7 +1,8 @@
 import wandb
 from wandb.integration.keras import WandbMetricsLogger
 from sklearn import model_selection
-from keras import optimizers, losses, callbacks
+from keras import optimizers, losses, callbacks, utils
+import tensorflow as tf
 
 import argparse
 from types import SimpleNamespace
@@ -10,7 +11,7 @@ import csv
 from pathlib import Path
 
 from utils import load_face_data, GeneratorTestCallback
-from data_generator import DataGenerator
+from data_generator import get_dataset_from_slices
 
 from discriminator import get_discriminator, discriminator_loss
 from generator import get_generator
@@ -22,12 +23,7 @@ def train_and_evaluate_hyperparameters(hyperparameters, x, y, model_save_path, i
     # Data information
     label_structure = ['age_output', 'gender_output']
 
-    data_generator = DataGenerator(
-        image_paths=x,
-        labels=y,
-        label_structure=label_structure,
-        batch_size=hyperparameters.batch_size,
-        dim=hyperparameters.image_dim)
+    dataset = get_dataset_from_slices(x, y, hyperparameters)
 
     checkpoint_filepath = '/tmp/checkpoints/checkpoint.face.keras'
 
@@ -77,7 +73,7 @@ def train_and_evaluate_hyperparameters(hyperparameters, x, y, model_save_path, i
     def scheduler(epoch, lr):
         return float(lr * hyperparameters.learning_rate_factor)
 
-    #model_callbacks.append(callbacks.LearningRateScheduler(scheduler))
+    # model_callbacks.append(callbacks.LearningRateScheduler(scheduler))
 
     model_callbacks.append(GeneratorTestCallback(hyperparameters.latent_dim))
 
@@ -100,7 +96,7 @@ def train_and_evaluate_hyperparameters(hyperparameters, x, y, model_save_path, i
     except Exception as e:
         print("No wandb callback added.")
 
-    history = model.fit(x=data_generator,
+    history = model.fit(x=dataset,
                         epochs=hyperparameters.epochs,
                         callbacks=model_callbacks)
 
