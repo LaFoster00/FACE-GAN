@@ -57,7 +57,7 @@ class FaceGAN(models.Model):
         generated_images = self.generator(random_vector_labels)
 
         combined_images = ops.concatenate(
-            [generated_images, real_images], axis=0
+            [real_images, generated_images], axis=0
         )
 
         # Assemble labels discriminating real from fake images.
@@ -87,7 +87,7 @@ class FaceGAN(models.Model):
         )
 
         # Assemble labels that say "all real images".
-        misleading_labels = ops.stack([ops.zeros((batch_size, 1)),  ops.expand_dims(age_labels, axis=-1), ops.expand_dims(gender_labels, axis=-1)], axis=-1)
+        misleading_labels = ops.stack([ops.ones((batch_size, 1)),  ops.expand_dims(age_labels, axis=-1), ops.expand_dims(gender_labels, axis=-1)], axis=-1)
 
         # Train the generator (note that we should *not* update the weights
         # of the discriminator)!

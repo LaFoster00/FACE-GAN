@@ -27,8 +27,8 @@ def age_loss_fn(real_true, age_true, age_pred):
     Returns:
     - loss: Mean squared error between true and predicted ages for valid entries.
     """
-    age_pred = age_pred * ops.cast(ops.equal(real_true, 0), age_pred.dtype)  # Mask invalid age values (>= 200)
-    age_true = age_true * ops.cast(ops.equal(real_true, 0), age_true.dtype)
+    age_pred = age_pred * ops.cast(ops.equal(real_true, 1), age_pred.dtype)  # Mask invalid age values (>= 200)
+    age_true = age_true * ops.cast(ops.equal(real_true, 1), age_true.dtype)
     return losses.mean_squared_error(age_true, age_pred)
 
 
@@ -64,8 +64,8 @@ def gender_loss_fn(real_true, gender_true, gender_pred):
     Returns:
     - loss: Binary cross-entropy between true and predicted gender labels.
     """
-    gender_pred = gender_pred * ops.cast(ops.equal(real_true, 0), gender_pred.dtype)  # Mask invalid gender values (>= 2)
-    gender_true = gender_true * ops.cast(ops.equal(real_true, 0), gender_true.dtype)
+    gender_pred = gender_pred * ops.cast(ops.equal(real_true, 1), gender_pred.dtype)  # Mask invalid gender values (>= 2)
+    gender_true = gender_true * ops.cast(ops.equal(real_true, 1), gender_true.dtype)
     return losses.binary_crossentropy(gender_true, gender_pred)
 
 
