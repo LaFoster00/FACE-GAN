@@ -128,25 +128,28 @@ def FaceIdentifier(
     # Load pre-trained model with frozen weights
     basemodel = None
     preprocessing = None
-    match model:# [efficientnet-b0/b4, resnet50/101, inception, mobilenet
-        case 'efficientnet-b0':
-            basemodel = applications.efficientnet.EfficientNetB0(weights='imagenet', include_top=False)
-            preprocessing = applications.efficientnet.preprocess_input
-        case 'efficientnet-b4':
-            basemodel = applications.efficientnet.EfficientNetB4(weights='imagenet', include_top=False)
-            preprocessing = applications.efficientnet.preprocess_input
-        case 'resnet50':
-            basemodel = applications.ResNet50(weights='imagenet', include_top=False)
-            preprocessing = applications.resnet.preprocess_input
-        case 'resnet101':
-            basemodel = applications.ResNet101(weights='imagenet', include_top=False)
-            preprocessing = applications.resnet.preprocess_input
-        case 'inception':
-            basemodel = applications.InceptionV3(weights='imagenet', include_top=False)
-            preprocessing = applications.inception_v3.preprocess_input
-        case 'mobilenet':
-            basemodel = applications.MobileNetV2(weights='imagenet', include_top=False)
-            preprocessing = applications.mobilenet_v2.preprocess_input
+    
+    if model == 'efficientnet-b0':
+        basemodel = applications.efficientnet.EfficientNetB0(weights='imagenet', include_top=False)
+        preprocessing = applications.efficientnet.preprocess_input
+    elif model == 'efficientnet-b4':
+        basemodel = applications.efficientnet.EfficientNetB4(weights='imagenet', include_top=False)
+        preprocessing = applications.efficientnet.preprocess_input
+    elif model == 'resnet50':
+        basemodel = applications.ResNet50(weights='imagenet', include_top=False)
+        preprocessing = applications.resnet.preprocess_input
+    elif model == 'resnet101':
+        basemodel = applications.ResNet101(weights='imagenet', include_top=False)
+        preprocessing = applications.resnet.preprocess_input
+    elif model == 'inception':
+        basemodel = applications.InceptionV3(weights='imagenet', include_top=False)
+        preprocessing = applications.inception_v3.preprocess_input
+    elif model == 'mobilenet':
+        basemodel = applications.MobileNetV2(weights='imagenet', include_top=False)
+        preprocessing = applications.mobilenet_v2.preprocess_input
+    else:
+        raise ValueError("Unsupported model type specified.")
+
 
     if basemodel is None:
         raise Exception('Base model not defined.')
