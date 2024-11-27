@@ -33,6 +33,8 @@ class FaceGAN(models.Model):
         age_labels = labels['age_output']
         gender_labels = labels['gender_output']
         labels = ops.stack([age_labels, gender_labels], axis=-1)
+        stacked_labels = ops.stack([age_labels, gender_labels], axis=-1)
+
         # Add dummy dimensions to the labels so that they can be concatenated with
         # the images. This is for the discriminator.
         image_labels = labels[:, :, None, None]
@@ -63,11 +65,20 @@ class FaceGAN(models.Model):
         # Assemble labels discriminating real from fake images.
         real_fake_labels = ops.concatenate(
             [
-                ops.stack([ops.ones((batch_size, 1)), ops.expand_dims(age_labels, axis=-1), ops.expand_dims(gender_labels, axis=-1)], axis=-1),
-                ops.stack([ops.zeros((batch_size, 1)),  ops.expand_dims(age_labels, axis=-1), ops.expand_dims(gender_labels, axis=-1)], axis=-1)
+                ops.ones((batch_size, 1)),
+                ops.zeros((batch_size, 1))
             ],
             axis=0
         )
+
+        # Add random noise to the labels - important trick!
+        real_fake_labels += 0.05 * random.uniform(ops.shape(real_fake_labels))
+        real_fake_labels = ops.clip(real_fake_labels, 0, 1)
+
+        all_labels = ops.repeat(stacked_labels, repeats=2, axis=0)
+        real_fake_labels = ops.concatenate(
+            [real_fake_labels, all_labels]
+            , axis=-1)
 
         # Train the discriminator.
         with tf.GradientTape() as tape:
@@ -87,7 +98,7 @@ class FaceGAN(models.Model):
         )
 
         # Assemble labels that say "all real images".
-        misleading_labels = ops.stack([ops.ones((batch_size, 1)),  ops.expand_dims(age_labels, axis=-1), ops.expand_dims(gender_labels, axis=-1)], axis=-1)
+        misleading_labels = ops.concatenate([ops.ones((batch_size, 1)), stacked_labels], axis=-1)
 
         # Train the generator (note that we should *not* update the weights
         # of the discriminator)!

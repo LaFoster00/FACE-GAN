@@ -22,35 +22,9 @@ def train_and_evaluate_hyperparameters(hyperparameters, x, y, model_save_path, i
     # Data information
     label_structure = ['age_output', 'gender_output']
 
-    # Step 1: Split data into training (80%) and test+validation (20%) sets
-    x_train, x_temp, labels_train, labels_temp = model_selection.train_test_split(x,
-                                                                                  y,
-                                                                                  test_size=0.2,
-                                                                                  random_state=random.randint(0, 20000))
-
-    # Step 2: Split the remaining 20% data into validation (10%) and test (10%) sets
-    x_val, x_test, labels_val, labels_test = model_selection.train_test_split(x_temp,
-                                                                              labels_temp,
-                                                                              test_size=0.5,
-                                                                              random_state=random.randint(0, 20000))
-
-    training_generator = DataGenerator(
-        image_paths=x_train,
-        labels=labels_train,
-        label_structure=label_structure,
-        batch_size=hyperparameters.batch_size,
-        dim=hyperparameters.image_dim)
-
-    val_generator = DataGenerator(
-        image_paths=x_val,
-        labels=labels_val,
-        label_structure=label_structure,
-        batch_size=hyperparameters.batch_size,
-        dim=hyperparameters.image_dim)
-
-    test_generator = DataGenerator(
-        image_paths=x_test,
-        labels=labels_test,
+    data_generator = DataGenerator(
+        image_paths=x,
+        labels=y,
         label_structure=label_structure,
         batch_size=hyperparameters.batch_size,
         dim=hyperparameters.image_dim)
@@ -126,12 +100,9 @@ def train_and_evaluate_hyperparameters(hyperparameters, x, y, model_save_path, i
     except Exception as e:
         print("No wandb callback added.")
 
-    history = model.fit(x=training_generator,
-                        #validation_data=val_generator,
+    history = model.fit(x=data_generator,
                         epochs=hyperparameters.epochs,
                         callbacks=model_callbacks)
-
-    result = model.evaluate(x=test_generator)
     print(result)
 
     generator = model.generator

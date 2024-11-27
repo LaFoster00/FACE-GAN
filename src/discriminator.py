@@ -89,7 +89,6 @@ def gender_metric(y_true, y_pred):
     y_true = ops.where(mask, y_true, ops.zeros_like(y_true))
     return metrics.binary_accuracy(y_true, y_pred)
 
-
 def get_discriminator(
         input_shape=(256, 256, 3),
         dropout_rate=0.25,
@@ -191,17 +190,17 @@ def compile_discriminator(discriminator, learning_rate):
         })
 
 def discriminator_loss(y_true, y_pred):
-    real_true = y_true[:, 0, 0]
-    age_true = y_true[:, 0, 1]
-    gender_true = y_true[:, 0, 2]
+    real_true = y_true[:, 0]
+    age_true = y_true[:, 1]
+    gender_true = y_true[:, 2]
 
     real_pred = y_pred['real_output'][:, 0]
     age_pred = y_pred['age_output'][:, 0]
     gender_pred = y_pred['gender_output'][:, 0]
 
-    real_loss = ops.mean(losses.binary_crossentropy(real_true, real_pred))
-    age_loss = ops.mean(age_loss_fn(real_true, age_true, age_pred))
-    gender_loss = ops.mean(gender_loss_fn(real_true, gender_true, gender_pred))
+    real_loss = ops.mean(losses.binary_crossentropy(real_true, real_pred)) * 100
+    age_loss = ops.mean(age_loss_fn(real_true, age_true, age_pred)) * 0.01
+    gender_loss = ops.mean(gender_loss_fn(real_true, gender_true, gender_pred)) * 10
 
     return ops.sum([real_loss, age_loss, gender_loss])
 
