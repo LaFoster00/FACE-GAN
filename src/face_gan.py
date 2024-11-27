@@ -1,5 +1,8 @@
 from keras import models, random, metrics, losses, layers, ops
 import tensorflow as tf
+import numpy as np
+from wandb.docker import image_id
+
 
 class FaceGAN(models.Model):
     def __init__(self, discriminator, generator, latent_dim, image_dim, num_classes):
@@ -25,16 +28,19 @@ class FaceGAN(models.Model):
 
     def train_step(self, data):
         # Unpack the data.
-        real_images, one_hot_labels = data
+        real_images, labels = data
 
+        age_labels = labels['age_output']
+        gender_labels = labels['gender_output']
+        labels = ops.stack([age_labels, gender_labels], axis=-1)
         # Add dummy dimensions to the labels so that they can be concatenated with
         # the images. This is for the discriminator.
-        image_one_hot_labels = one_hot_labels[:, :, None, None]
-        image_one_hot_labels = ops.repeat(
-            image_one_hot_labels, repeats=[self.image_dim * self.image_dim]
+        image_labels = labels[:, :, None, None]
+        image_labels = ops.repeat(
+            image_labels, repeats=[self.image_dim * self.image_dim]
         )
-        image_one_hot_labels = ops.reshape(
-            image_one_hot_labels, (-1, self.image_dim, self.image_dim, self.num_classes)
+        image_labels = ops.reshape(
+            image_labels, (-1, self.image_dim, self.image_dim, self.num_classes)
         )
 
         # Sample random points in the latent space and concatenate the labels.
@@ -44,7 +50,7 @@ class FaceGAN(models.Model):
             shape=(batch_size, self.latent_dim), seed=self.seed_generator
         )
         random_vector_labels = ops.concatenate(
-            [random_latent_vectors, one_hot_labels], axis=1
+            [random_latent_vectors, labels], axis=1
         )
 
         # Decode the noise (guided by labels) to fake images.
@@ -53,22 +59,22 @@ class FaceGAN(models.Model):
         # Combine them with real images. Note that we are concatenating the labels
         # with these images here.
         fake_image_and_labels = ops.concatenate(
-            [generated_images, image_one_hot_labels], -1
+            [generated_images, image_labels], axis=-1
         )
-        real_image_and_labels = ops.concatenate([real_images, image_one_hot_labels], -1)
+        real_image_and_labels = ops.concatenate([real_images, image_labels], -1)
         combined_images = ops.concatenate(
             [fake_image_and_labels, real_image_and_labels], axis=0
         )
 
         # Assemble labels discriminating real from fake images.
-        labels = ops.concatenate(
+        real_fake_labels = ops.concatenate(
             [ops.ones((batch_size, 1)), ops.zeros((batch_size, 1))], axis=0
         )
 
         # Train the discriminator.
         with tf.GradientTape() as tape:
             predictions = self.discriminator(combined_images)
-            d_loss = self.loss_fn(labels, predictions)
+            d_loss = self.loss_fn(real_fake_labels, predictions)
         grads = tape.gradient(d_loss, self.discriminator.trainable_weights)
         self.d_optimizer.apply_gradients(
             zip(grads, self.discriminator.trainable_weights)
@@ -79,7 +85,7 @@ class FaceGAN(models.Model):
             shape=(batch_size, self.latent_dim), seed=self.seed_generator
         )
         random_vector_labels = ops.concatenate(
-            [random_latent_vectors, one_hot_labels], axis=1
+            [random_latent_vectors, labels], axis=1
         )
 
         # Assemble labels that say "all real images".
@@ -90,7 +96,7 @@ class FaceGAN(models.Model):
         with tf.GradientTape() as tape:
             fake_images = self.generator(random_vector_labels)
             fake_image_and_labels = ops.concatenate(
-                [fake_images, image_one_hot_labels], -1
+                [fake_images, image_labels], -1
             )
             predictions = self.discriminator(fake_image_and_labels)
             g_loss = self.loss_fn(misleading_labels, predictions)

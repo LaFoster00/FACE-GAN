@@ -70,7 +70,7 @@ def train_and_evaluate_hyperparameters(hyperparameters, x, y, model_save_path, i
     )
 
     discriminator = get_discriminator(
-        input_shape=(hyperparameters.image_dim, hyperparameters.image_dim, 3),
+        input_shape=(hyperparameters.image_dim, hyperparameters.image_dim, discriminator_in_channels),
         dropout_rate=hyperparameters.dropout_rate,
         model=hyperparameters.model,
         freeze_base=hyperparameters.freeze_base
@@ -90,7 +90,6 @@ def train_and_evaluate_hyperparameters(hyperparameters, x, y, model_save_path, i
         g_optimizer=optimizers.Adam(learning_rate=hyperparameters.learning_rate),
         loss_fn=losses.BinaryCrossentropy(from_logits=False), )
     model.summary()
-    quit(0)
 
     model_callbacks = []
 
@@ -115,18 +114,19 @@ def train_and_evaluate_hyperparameters(hyperparameters, x, y, model_save_path, i
     model_callbacks.append(callbacks.LearningRateScheduler(scheduler))
 
     try:
-        wandb.init(
-            project="FACE-GAN",
-            config={
-                "epochs": hyperparameters.epochs,
-                "batch_size": hyperparameters.batch_size,
-                "start_learning_rate": hyperparameters.learning_rate,
-                "learning_rate_factor": hyperparameters.learning_rate_factor,
-                "dropout": hyperparameters.dropout_rate,
-                "base_model": hyperparameters.model,
-                "freeze_base": hyperparameters.freeze_base,
-            })
-        model_callbacks.append(WandbMetricsLogger())
+        if False:
+            wandb.init(
+                project="FACE-GAN",
+                config={
+                    "epochs": hyperparameters.epochs,
+                    "batch_size": hyperparameters.batch_size,
+                    "start_learning_rate": hyperparameters.learning_rate,
+                    "learning_rate_factor": hyperparameters.learning_rate_factor,
+                    "dropout": hyperparameters.dropout_rate,
+                    "base_model": hyperparameters.model,
+                    "freeze_base": hyperparameters.freeze_base,
+                })
+            model_callbacks.append(WandbMetricsLogger())
     except Exception as e:
         print("No wandb callback added.")
 

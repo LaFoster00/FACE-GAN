@@ -1,4 +1,3 @@
-
 from keras import models, layers, applications, metrics, losses, optimizers, callbacks, saving, ops, utils, backend
 import keras
 
@@ -146,6 +145,10 @@ def get_discriminator(
     x = layers.GlobalAveragePooling2D()(x)
     x = layers.BatchNormalization()(x)
 
+    # Define image real branch (binary)
+    real_output = layers.Dropout(dropout_rate)(x)
+    real_output = layers.Dense(1, activation='sigmoid')(real_output)
+
     # Define age output branch (regression)
     age_output = layers.Dense(256, activation='relu', name='age_1')(x)
     age_output = layers.BatchNormalization()(age_output)
@@ -163,11 +166,15 @@ def get_discriminator(
     gender_output = layers.Dense(1, activation='sigmoid', name='gender_output')(gender_output)
 
     # Combine all branches into a final model
-    model = models.Model(inputs=inputs, outputs={'age_output': age_output,
-                                                 'gender_output': gender_output})
+    model = models.Model(inputs=inputs,
+                         outputs=
+                         {'real_output': real_output,
+                          'age_output': age_output,
+                          'gender_output': gender_output})
     model.name = 'discriminator'
 
     return model
+
 
 def compile_discriminator(discriminator, learning_rate):
     # Compile the model with respective loss functions and metrics

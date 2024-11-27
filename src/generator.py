@@ -19,7 +19,7 @@ def get_generator(num_channels, image_dim):
     x = layers.LeakyReLU(negative_slope=0.2)(x)
     x = layers.Conv2DTranspose(128, (4, 4), strides=(2, 2), padding="same")(x)
     x = layers.LeakyReLU(negative_slope=0.2)(x)
-    x = layers.Conv2D(1, (upscale_dim, upscale_dim), padding="same", activation="sigmoid")(x)
+    x = layers.Conv2D(3, (upscale_dim, upscale_dim), padding="same", activation="sigmoid")(x)
 
     model = models.Model(inputs=input, outputs=x)
     model.name = "generator"
