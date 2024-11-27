@@ -53,7 +53,7 @@ def generate_ffhq_labels(image_paths):
     mapped_labels = {}
     for feature_json_id, feature_json in feature_jsons.items():
         face_attributes = feature_json[0]['faceAttributes']
-        mapped_labels[feature_json_id] = [1, face_attributes['age'], int(face_attributes['gender'] == 'female')]
+        mapped_labels[feature_json_id] = [face_attributes['age'], int(face_attributes['gender'] == 'female')]
 
     image_paths = [image_path for image_path in image_paths if int(Path(image_path).stem) in mapped_labels]
     labels = [mapped_labels[int(Path(image_path).stem)] for image_path in image_paths]
@@ -100,7 +100,7 @@ def load_utk_face_data(path):
             invalid_images.append(index)
             continue
 
-        labels.append([1, age, gender])  # Label '1' for face images
+        labels.append([age, gender])  # Label '1' for face images
 
     # Remove invalid images
     for invalid_image in invalid_images:
