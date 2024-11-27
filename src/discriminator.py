@@ -165,6 +165,7 @@ def get_discriminator(
     # Combine all branches into a final model
     model = models.Model(inputs=inputs, outputs={'age_output': age_output,
                                                  'gender_output': gender_output})
+    model.name = 'discriminator'
 
     return model
 
