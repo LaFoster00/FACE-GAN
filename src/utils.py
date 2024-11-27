@@ -128,9 +128,14 @@ def load_face_data(utk_face_path, ffhq_path, with_ffhq = True, with_utk = True):
 
 def getGeneratorInputData(latent_dim, age=None, gender=None, numImages=1):
     data = []
+    if age is None:
+        age = random.randint(0, 100)
+    if gender is None:
+        gender = random.randint(0, 1)
+
     for i in range(numImages):
         noise = keras.random.normal(shape=(latent_dim,))
-        noise_and_labels = ops.concatenate([noise, [age], [gender]])
+        noise_and_labels = ops.concatenate([noise, np.array([age]), np.array([gender])])
         data.append(noise_and_labels)
 
     return np.array(data)
