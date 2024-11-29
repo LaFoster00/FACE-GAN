@@ -168,3 +168,24 @@ class GeneratorTestCallback(callbacks.Callback):
             })
         except Exception:
             pass
+
+def number_features(stage, fmap_base=8192, fmap_decay=1.0, fmap_max=512):
+    """
+    Used to calculate the number of features used by each stage bounded by the total number
+    of stages and feature maps
+    :param stage: The current stage of the model
+    :param fmap_base: The total number of feature maps allowed
+    :param fmap_decay: The log2 feature map reduction when doubling the resolution
+    :param fmap_max: The max number of feature maps for a single stage
+    :return: The number of feature maps
+    """
+    return min(int(fmap_base / (2.0 ** (stage * fmap_decay))), fmap_max)
+
+def lerp(a, b, t):
+    return a + (b - a) * t
+
+def lerp_clip(a, b, t):
+    return a + (b - a) * ops.clip(t, a, b)
+
+# Conditional set
+def cset(cur_lambda, new_cond, new_lambda): return lambda: ops.cond(new_cond, new_lambda, cur_lambda)
