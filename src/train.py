@@ -1,8 +1,7 @@
 import wandb
 from wandb.integration.keras import WandbMetricsLogger
 from sklearn import model_selection
-from keras import optimizers, losses, callbacks, utils
-import tensorflow as tf
+from keras import optimizers, ops
 
 import argparse
 from types import SimpleNamespace
@@ -13,7 +12,7 @@ from pathlib import Path
 from utils import load_face_data, GeneratorTestCallback
 from data_generator import get_dataset_from_slices
 
-from discriminator import get_discriminator, discriminator_loss
+from discriminator import get_discriminator
 from generator import get_generator
 from face_gan import FaceGAN
 
@@ -39,36 +38,36 @@ def train_and_evaluate_hyperparameters(hyperparameters, x, y, model_save_path, i
         image_dim=hyperparameters.image_dim,
     )
 
+    def discriminator_loss(real_img, fake_img):
+        real_loss = ops.mean(real_img)
+        fake_loss = ops.mean(fake_img)
+        return fake_loss - real_loss
+
+    def generator_loss(y_pred):
+        return -ops.mean(y_pred)
+
     discriminator = get_discriminator(
         input_shape=(hyperparameters.image_dim, hyperparameters.image_dim, discriminator_in_channels),
         dropout_rate=hyperparameters.dropout_rate,
-        model=hyperparameters.model,
-        freeze_base=hyperparameters.freeze_base
     )
 
     model = FaceGAN(
         generator=generator,
         discriminator=discriminator,
         latent_dim=hyperparameters.latent_dim,
-        image_dim=hyperparameters.image_dim,
-        num_classes=num_classes,
+        discriminator_extra_steps=3,
     )
 
     model.compile(
+        d_optimizer=optimizers.Adam(learning_rate=hyperparameters.learning_rate, beta_1=0.5, beta_2=0.9),
+        g_optimizer=optimizers.Adam(learning_rate=hyperparameters.learning_rate, beta_1=0.5, beta_2=0.9),
+        d_loss_fn=discriminator_loss,
+        g_loss_fn=generator_loss,
         run_eagerly=False,
-        d_optimizer=optimizers.Adam(learning_rate=hyperparameters.learning_rate),
-        g_optimizer=optimizers.Adam(learning_rate=hyperparameters.learning_rate),
-        loss_fn=discriminator_loss)
+    )
     model.summary()
 
     model_callbacks = []
-
-    model_callbacks.append(callbacks.ModelCheckpoint(
-        filepath=checkpoint_filepath,
-        monitor='val_loss',
-        mode='min',
-        save_best_only=True
-    ))
 
     def scheduler(epoch, lr):
         return float(lr * hyperparameters.learning_rate_factor)
@@ -86,9 +85,7 @@ def train_and_evaluate_hyperparameters(hyperparameters, x, y, model_save_path, i
                     "batch_size": hyperparameters.batch_size,
                     "start_learning_rate": hyperparameters.learning_rate,
                     "learning_rate_factor": hyperparameters.learning_rate_factor,
-                    "dropout": hyperparameters.dropout_rate,
-                    "base_model": hyperparameters.model,
-                    "freeze_base": hyperparameters.freeze_base,
+                    "dropout_rate": hyperparameters.dropout_rate,
                     "image_dim": hyperparameters.image_dim,
                     "latent_dim": hyperparameters.latent_dim,
                 })
@@ -138,14 +135,6 @@ def get_arg_parser():
     parser.add_argument('--learning-rate-factor', type=float, default=0.9,
                         help='Learning rate decay factor')
 
-    parser.add_argument('--model', type=str, default='efficientnet-b0',
-                        choices=['efficientnet-b0', 'efficientnet-b4',
-                                 'resnet50', 'resnet101', 'inception', 'mobilenet'],
-                        help='Model architecture')
-
-    parser.add_argument('--freeze-base', type=bool, default=True,
-                        help='Freeze the base model for training.')
-
     parser.add_argument('--infer-previous-model', action='store_true', default=False,
                         help='Run inference on 8 of images using the previously trained model, before training.')
 
@@ -169,8 +158,6 @@ if __name__ == '__main__':
         learning_rate=args.learning_rate,
         dropout_rate=args.dropout_rate,
         learning_rate_factor=args.learning_rate_factor,
-        model=args.model,
-        freeze_base=args.freeze_base,
     )
 
     print("\nRunning training with following hyperparameters:")
@@ -181,8 +168,6 @@ if __name__ == '__main__':
     print(f"\tLearning Rate: {hyperparameters.learning_rate}")
     print(f"\tDropout Rate: {hyperparameters.dropout_rate}")
     print(f"\tLearning Rate Factor: {hyperparameters.learning_rate_factor}")
-    print(f"\tModel: {hyperparameters.model}")
-    print(f"\tFreeze Base Model: {hyperparameters.freeze_base}")
     print()
 
     # Save information
