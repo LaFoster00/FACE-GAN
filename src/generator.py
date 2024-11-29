@@ -49,7 +49,7 @@ def get_generator(
         if log2res == 2:  # 4x4
             if normalize_latents: x = PixelNorm()(x)
             x = layers.Dense(nf(log2res - 1) * 16)(x)
-            x = layers.Reshape(target_shape=(-1, nf(log2res-1), 4, 4))(x)
+            x = layers.Reshape(target_shape=(-1, 4, 4, nf(log2res-1)))(x)
             x = layers.LeakyReLU(negative_slope=0.2)(x)
             x = pn(x)
             x = layers.Conv2D(
@@ -57,7 +57,7 @@ def get_generator(
                 kernel_size=(3, 3),
                 strides=(1,1),
                 padding='same',
-                data_format='channels_first')(x)
+                data_format='channels_last')(x)
             x = layers.LeakyReLU(negative_slope=0.2)(x)
             x = pn(x)
         else: # 8x8 and up
@@ -67,7 +67,7 @@ def get_generator(
                 kernel_size=(3, 3),
                 strides=(1, 1),
                 padding='same',
-                data_format='channels_first')(x)
+                data_format='channels_last')(x)
             x = layers.LeakyReLU(negative_slope=0.2)(x)
             x = pn(x)
             x = layers.Conv2D(
@@ -75,7 +75,7 @@ def get_generator(
                 kernel_size=(3, 3),
                 strides=(1, 1),
                 padding='same',
-                data_format='channels_first')(x)
+                data_format='channels_last')(x)
             x = layers.LeakyReLU(negative_slope=0.2)(x)
             x = pn(x)
         return x

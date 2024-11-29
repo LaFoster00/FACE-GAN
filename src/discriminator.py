@@ -10,7 +10,7 @@ from utils import number_features, lerp_clip, cset, lerp
 
 
 def get_discriminator_model(
-    images_in,                          # Input: Images [minibatch, channel, height, width].
+    images_in,                          # Input: Images [minibatch, height, width, channel].
     num_channels        = 1,            # Number of input color channels. Overridden based on dataset.
     resolution          = 32,           # Input resolution. Overridden based on dataset.
     label_size          = 0,            # Dimensionality of the labels, 0 if no labels. Overridden based on dataset.
@@ -40,14 +40,14 @@ def get_discriminator_model(
                 kernel_size=(3, 3),
                 strides=(1, 1),
                 padding='same',
-                data_format='channels_first')(x)
+                data_format='channels_last')(x)
             x = layers.LeakyReLU(negative_slope=0.2)(x)
             x = layers.Conv2D(
                 filters=nf(log2res - 2),
                 kernel_size=(3, 3),
                 strides=(1, 1),
                 padding='same',
-                data_format='channels_first')(x)
+                data_format='channels_last')(x)
             x = layers.LeakyReLU(negative_slope=0.2)(x)
             x = downscale2D(x)
         else: # 4x4
@@ -56,14 +56,14 @@ def get_discriminator_model(
                 kernel_size=(3, 3),
                 strides=(1, 1),
                 padding='same',
-                data_format='channels_first')(x)
+                data_format='channels_last')(x)
             x = layers.LeakyReLU(negative_slope=0.2)(x)
             x = layers.Conv2D(
                 filters=nf(log2res - 2),
                 kernel_size=(3, 3),
                 strides=(1, 1),
                 padding='same',
-                data_format='channels_first')(x)
+                data_format='channels_last')(x)
             x = layers.LeakyReLU(negative_slope=0.2)(x)
             x = layers.Dense(1+label_size)(x)
         return x
