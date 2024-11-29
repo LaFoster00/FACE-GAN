@@ -123,12 +123,12 @@ class EqualizedDense(layers.Layer):
         self.learning_rate_multiplier = learning_rate_multiplier
 
     def build(self, input_shape):
-        self.in_channels = input_shape[-1]
+        self.in_channels = int(input_shape[-1])  # Convert to int for static shape
         initializer = keras.initializers.RandomNormal(
             mean=0.0, stddev=1.0 / self.learning_rate_multiplier
         )
         self.w = self.add_weight(
-            shape=[self.in_channels, self.units],
+            shape=(self.in_channels, self.units),
             initializer=initializer,
             trainable=True,
             name="kernel",
@@ -136,13 +136,15 @@ class EqualizedDense(layers.Layer):
         self.b = self.add_weight(
             shape=(self.units,), initializer="zeros", trainable=True, name="bias"
         )
-        fan_in = self.in_channels
-        self.scale = ops.sqrt(self.gain / fan_in)
+        # Store gain/fan_in as a constant to avoid TensorFlow graph issues
+        fan_in = float(self.in_channels)
+        self.scale = (self.gain / fan_in) ** 0.5
 
     def call(self, inputs):
-        a = self.scale * self.w
-        mat = ops.matmul(inputs, a)
-        output = ops.add(mat, self.b)
+        # Dynamically compute scaled weights
+        scaled_w = self.w * self.scale
+        # Perform matrix multiplication and bias addition
+        output = tf.matmul(inputs, scaled_w) + self.b
         return output * self.learning_rate_multiplier
 
 
