@@ -1,79 +1,154 @@
-from keras import models, random, metrics, losses, layers, ops
+from keras import models, layers, ops, backend, random
+import keras
 import tensorflow as tf
 import numpy as np
-from wandb.docker import image_id
+
+from utils import log2
+from layers import wasserstein_loss
+
+from generator import Mapping, Generator
+from discriminator import Discriminator
 
 
-class FaceGAN(models.Model):
-    def __init__(self, discriminator, generator, latent_dim, image_dim, num_classes):
+class StyleGAN(models.Model):
+    def __init__(self, z_dim=512, target_res=64, start_res=4):
         super().__init__()
-        self.discriminator = discriminator
-        self.generator = generator
-        self.image_dim = image_dim
-        self.latent_dim = latent_dim
-        self.num_classes = num_classes
-        self.seed_generator = random.SeedGenerator(1337)
-        self.g_loss_metric = metrics.Mean(name="g_loss")
-        self.d_loss_metric = metrics.Mean(name="d_loss")
+        self.z_dim = z_dim
+
+        self.target_res_log2 = log2(target_res)
+        self.start_res_log2 = log2(start_res)
+        self.current_res_log2 = self.target_res_log2
+        self.num_stages = self.target_res_log2 - self.start_res_log2 + 1
+
+        self.alpha = keras.Variable(1.0, dtype=backend.floatx(), trainable=False, name="alpha")
+
+        self.mapping = Mapping(num_stages=self.num_stages)
+        self.d_builder = Discriminator(self.start_res_log2, self.target_res_log2)
+        self.g_builder = Generator(self.start_res_log2, self.target_res_log2)
+        self.g_input_shape = self.g_builder.input_shape
+
+        self.phase = None
+        self.train_step_counter = keras.Variable(0, dtype='int32', trainable=False)
+
+        self.loss_weights = {"gradient_penalty": 10, "drift": 0.001}
+
+    def grow_model(self, res):
+        backend.clear_session()
+        res_log2 = log2(res)
+        self.generator = self.g_builder.grow(res_log2)
+        self.discriminator = self.d_builder.grow(res_log2)
+        self.current_res_log2 = res_log2
+        print(f"\nModel resolution:{res}x{res}")
+
+    def compile(
+            self,
+            steps_per_epoch,
+            phase,
+            res,
+            d_optimizer,
+            g_optimizer,
+            *args,
+            **kwargs,
+    ):
+        self.loss_weights = kwargs.pop("loss_weights", self.loss_weights)
+        self.steps_per_epoch = steps_per_epoch
+        if res != 2 ** self.current_res_log2:
+            self.grow_model(res)
+            self.d_optimizer = d_optimizer
+            self.g_optimizer = g_optimizer
+
+        self.train_step_counter.assign(0)
+        self.phase = phase
+        self.d_loss_metric = keras.metrics.Mean(name="d_loss")
+        self.g_loss_metric = keras.metrics.Mean(name="g_loss")
+        super().compile(*args, **kwargs)
 
     @property
     def metrics(self):
-        return [self.g_loss_metric, self.d_loss_metric]
+        return [self.d_loss_metric, self.g_loss_metric]
 
-    def compile(self, d_optimizer, g_optimizer, loss_fn, run_eagerly=False):
-        super().compile(run_eagerly=run_eagerly)
-        self.d_optimizer = d_optimizer
-        self.g_optimizer = g_optimizer
-        self.loss_fn = loss_fn
+    def generate_noise(self, batch_size):
+        noise = [
+            random.normal((batch_size, 2 ** res, 2 ** res, 1))
+            for res in range(self.start_res_log2, self.target_res_log2 + 1)
+        ]
+        return noise
+
+    def gradient_loss(self, grad):
+        loss = ops.square(grad)
+        loss = ops.sum(loss, axis=ops.arange(1, ops.size(ops.shape(loss))))
+        loss = ops.sqrt(loss)
+        loss = ops.mean(ops.square(loss - 1))
+        return loss
 
     def train_step(self, data):
-        # Unpack the data.
         real_images, labels = data
+        self.train_step_counter.assign_add(1)
+
+        if self.phase == "TRANSITION":
+            self.alpha.assign(
+                ops.cast(self.train_step_counter / self.steps_per_epoch, backend.floatx())
+            )
+        elif self.phase == "STABLE":
+            self.alpha.assign(1.0)
+        else:
+            raise NotImplementedError
+        alpha = ops.expand_dims(self.alpha, 0)
         batch_size = ops.shape(real_images)[0]
+        real_labels = ops.ones(batch_size)
+        fake_labels = -ops.ones(batch_size)
 
-        # Sample random points in the latent space
-        batch_size = ops.shape(real_images)[0]
-        random_latent_vectors = random.normal(
-            shape=(batch_size, self.latent_dim), seed=self.seed_generator
-        )
+        z = random.normal((batch_size, self.z_dim))
+        const_input = ops.ones(tuple([batch_size] + list(self.g_input_shape)))
+        noise = self.generate_noise(batch_size)
 
-        # Decode them to fake images
-        generated_images = self.generator(random_latent_vectors)
+        # generator
+        with tf.GradientTape() as g_tape:
+            w = self.mapping(z)
+            fake_images = self.generator([const_input, w, noise, alpha])
+            pred_fake = self.discriminator([fake_images, alpha])
+            g_loss = wasserstein_loss(real_labels, pred_fake)
 
-        # Combine them with real images
-        combined_images = ops.concatenate([real_images, generated_images], axis=0)
+            trainable_weights = (
+                    self.mapping.trainable_weights + self.generator.trainable_weights
+            )
+            gradients = g_tape.gradient(g_loss, trainable_weights)
+            self.g_optimizer.apply_gradients(zip(gradients, trainable_weights))
 
-        # Assemble labels discriminating real from fake images
-        labels = ops.concatenate(
-            [ops.ones((batch_size, 1)), ops.zeros((batch_size, 1))], axis=0
-        )
-        # Add random noise to the labels - important trick!
-        labels += 0.05 * random.uniform(ops.shape(labels))
+        # discriminator
+        with tf.GradientTape() as gradient_tape, tf.GradientTape() as total_tape:
+            # forward pass
+            pred_fake = self.discriminator([fake_images, alpha])
+            pred_real = self.discriminator([real_images, alpha])
 
-        # Train the discriminator
-        with tf.GradientTape() as tape:
-            predictions = self.discriminator(combined_images)
-            d_loss = self.loss_fn(labels, predictions)
-        grads = tape.gradient(d_loss, self.discriminator.trainable_weights)
-        self.d_optimizer.apply_gradients(
-            zip(grads, self.discriminator.trainable_weights)
-        )
+            epsilon = random.uniform((batch_size, 1, 1, 1))
+            interpolates = epsilon * real_images + (1 - epsilon) * fake_images
+            gradient_tape.watch(interpolates)
+            pred_fake_grad = self.discriminator([interpolates, alpha])
 
-        # Sample random points in the latent space
-        random_latent_vectors = random.normal(
-            shape=(batch_size, self.latent_dim), seed=self.seed_generator
-        )
+            # calculate losses
+            loss_fake = wasserstein_loss(fake_labels, pred_fake)
+            loss_real = wasserstein_loss(real_labels, pred_real)
+            loss_fake_grad = wasserstein_loss(fake_labels, pred_fake_grad)
 
-        # Assemble labels that say "all real images"
-        misleading_labels = ops.ones((batch_size, 1))
+            # gradient penalty
+            gradients_fake = gradient_tape.gradient(loss_fake_grad, [interpolates])
+            gradient_penalty = self.loss_weights[
+                                   "gradient_penalty"
+                               ] * self.gradient_loss(gradients_fake)
 
-        # Train the generator (note that we should *not* update the weights
-        # of the discriminator)!
-        with tf.GradientTape() as tape:
-            predictions = self.discriminator(self.generator(random_latent_vectors))
-            g_loss = self.loss_fn(misleading_labels, predictions)
-        grads = tape.gradient(g_loss, self.generator.trainable_weights)
-        self.g_optimizer.apply_gradients(zip(grads, self.generator.trainable_weights))
+            # drift loss
+            all_pred = ops.concatenate([pred_fake, pred_real], axis=0)
+            drift_loss = self.loss_weights["drift"] * ops.mean(all_pred ** 2)
+
+            d_loss = loss_fake + loss_real + gradient_penalty + drift_loss
+
+            gradients = total_tape.gradient(
+                d_loss, self.discriminator.trainable_weights
+            )
+            self.d_optimizer.apply_gradients(
+                zip(gradients, self.discriminator.trainable_weights)
+            )
 
         # Update metrics
         self.d_loss_metric.update_state(d_loss)
@@ -82,3 +157,26 @@ class FaceGAN(models.Model):
             "d_loss": self.d_loss_metric.result(),
             "g_loss": self.g_loss_metric.result(),
         }
+
+    def call(self, inputs: dict()):
+        style_code = inputs.get("style_code", None)
+        z = inputs.get("z", None)
+        noise = inputs.get("noise", None)
+        batch_size = inputs.get("batch_size", 1)
+        alpha = inputs.get("alpha", 1.0)
+        alpha = ops.expand_dims(alpha, 0)
+        if style_code is None:
+            if z is None:
+                z = random.normal((batch_size, self.z_dim))
+            style_code = self.mapping(z)
+
+        if noise is None:
+            noise = self.generate_noise(batch_size)
+
+        # self.alpha.assign(alpha)
+
+        const_input = ops.ones(tuple([batch_size] + list(self.g_input_shape)))
+        images = self.generator([const_input, style_code, noise, alpha])
+        images = np.clip((images * 0.5 + 0.5) * 255, 0, 255).astype(np.uint8)
+
+        return images

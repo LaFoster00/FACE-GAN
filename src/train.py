@@ -3,78 +3,103 @@ from wandb.integration.keras import WandbMetricsLogger
 from sklearn import model_selection
 from keras import optimizers, losses, callbacks, utils
 import tensorflow as tf
+import keras
+import numpy as np
 
 import argparse
 from types import SimpleNamespace
-import random
 import csv
 from pathlib import Path
 
-from utils import load_face_data, GeneratorTestCallback
+from utils import load_face_data, GeneratorTestCallback, plot_images
 from data_generator import get_dataset_from_slices
 
-from discriminator import get_discriminator, discriminator_loss
-from generator import get_generator
-from face_gan import FaceGAN
+from face_gan import StyleGAN
+
+# we use different batch size for different resolution, so larger image size
+# could fit into GPU memory. The keys is image resolution in log2
+batch_sizes = {2: 16, 3: 16, 4: 16, 5: 16, 6: 16, 7: 8, 8: 4, 9: 2, 10: 1}
+# We adjust the train step accordingly
+train_step_ratio = {k: batch_sizes[2] / v for k, v in batch_sizes.items()}
 
 
-def train_and_evaluate_hyperparameters(hyperparameters, x, y, model_save_path, infer_previous_model,
-                                       infer_finished_model):
+def train(
+        model: StyleGAN,
+        start_res,
+        target_res,
+        hyperparameters,
+        dataset,
+        display_images=True,
+        callbacks=[],
+        checkpoint_path=Path(__file__).parent / '../saved_models/checkpoints',
+        model_save_path=Path(__file__).parent / '../saved_models',
+):
+    opt_cfg = {"learning_rate": hyperparameters.learning_rate, "beta_1": 0.0, "beta_2": 0.99, "epsilon": 1e-8}
+
+    val_batch_size = 16
+    val_z = tf.random.normal((val_batch_size, model.z_dim))
+    val_noise = model.generate_noise(val_batch_size)
+
+    start_res_log2 = int(np.log2(start_res))
+    target_res_log2 = int(np.log2(target_res))
+
+    for res_log2 in range(start_res_log2, target_res_log2 + 1):
+        res = 2 ** res_log2
+        for phase in ["TRANSITION", "STABLE"]:
+            if res == start_res and phase == "TRANSITION":
+                continue
+
+            steps = int(train_step_ratio[res_log2] * hyperparameters.steps_per_epoch)
+
+            model.compile(
+                d_optimizer= optimizers.Adam(**opt_cfg),
+                g_optimizer= optimizers.Adam(**opt_cfg),
+                loss_weights={"gradient_penalty": 10, "drift": 0.001},
+                steps_per_epoch=steps,
+                res=res,
+                phase=phase,
+                run_eagerly=True,
+            )
+
+            model.summary()
+
+            callbacks.append( keras.callbacks.ModelCheckpoint(
+                checkpoint_path / f"facegan_{res}x{res}.weights.h5",
+                save_weights_only=True,
+                verbose=0,
+            ))
+
+            print(phase)
+            model.fit(x=dataset,
+                      epochs=5,
+                      steps_per_epoch=steps,
+                      callbacks=callbacks
+            )
+
+            generator = model.generator
+            generator.save(model_save_path / "FaceGAN-Generator.keras")
+
+            discriminator = model.discriminator
+            discriminator.save(model_save_path / "FaceGAN-Discriminator.keras")
+
+            if display_images:
+                images = model({"z": val_z, "noise": val_noise, "alpha": 1.0})
+                plot_images(images, res_log2)
+
+
+def train_and_evaluate_hyperparameters(hyperparameters, x, y, model_save_path):
     # Data information
     label_structure = ['age_output', 'gender_output']
 
     dataset = get_dataset_from_slices(x, y, hyperparameters)
 
-    checkpoint_filepath = '/tmp/checkpoints/checkpoint.face.keras'
+    checkpoint_path = Path(__file__).parent / "../saved_models/checkpoints"
+    checkpoint_path.mkdir(parents=True, exist_ok=True)
 
-    num_classes = len(label_structure)
-    num_channels = 3
-
-    generator_in_channels = hyperparameters.latent_dim
-    discriminator_in_channels = num_channels
-    print(generator_in_channels, discriminator_in_channels)
-
-    generator = get_generator(
-        num_channels=generator_in_channels,
-        image_dim=hyperparameters.image_dim,
-    )
-
-    discriminator = get_discriminator(
-        input_shape=(hyperparameters.image_dim, hyperparameters.image_dim, discriminator_in_channels),
-        dropout_rate=hyperparameters.dropout_rate,
-        model=hyperparameters.model,
-        freeze_base=hyperparameters.freeze_base
-    )
-
-    model = FaceGAN(
-        generator=generator,
-        discriminator=discriminator,
-        latent_dim=hyperparameters.latent_dim,
-        image_dim=hyperparameters.image_dim,
-        num_classes=num_classes,
-    )
-
-    model.compile(
-        run_eagerly=False,
-        d_optimizer=optimizers.Adam(learning_rate=hyperparameters.learning_rate),
-        g_optimizer=optimizers.Adam(learning_rate=hyperparameters.learning_rate),
-        loss_fn=discriminator_loss)
-    model.summary()
+    START_RES = 4
+    TARGET_RES = hyperparameters.image_dim
 
     model_callbacks = []
-
-    model_callbacks.append(callbacks.ModelCheckpoint(
-        filepath=checkpoint_filepath,
-        monitor='val_loss',
-        mode='min',
-        save_best_only=True
-    ))
-
-    def scheduler(epoch, lr):
-        return float(lr * hyperparameters.learning_rate_factor)
-
-    # model_callbacks.append(callbacks.LearningRateScheduler(scheduler))
-
     model_callbacks.append(GeneratorTestCallback(hyperparameters.latent_dim))
 
     try:
@@ -83,12 +108,10 @@ def train_and_evaluate_hyperparameters(hyperparameters, x, y, model_save_path, i
                 project="FACE-GAN",
                 config={
                     "epochs": hyperparameters.epochs,
+                    "steps_per_epoch": hyperparameters.steps_per_epoch,
                     "batch_size": hyperparameters.batch_size,
                     "start_learning_rate": hyperparameters.learning_rate,
                     "learning_rate_factor": hyperparameters.learning_rate_factor,
-                    "dropout": hyperparameters.dropout_rate,
-                    "base_model": hyperparameters.model,
-                    "freeze_base": hyperparameters.freeze_base,
                     "image_dim": hyperparameters.image_dim,
                     "latent_dim": hyperparameters.latent_dim,
                 })
@@ -96,22 +119,18 @@ def train_and_evaluate_hyperparameters(hyperparameters, x, y, model_save_path, i
     except Exception as e:
         print("No wandb callback added.")
 
-    history = model.fit(x=dataset,
-                        epochs=hyperparameters.epochs,
-                        callbacks=model_callbacks)
+    model = StyleGAN(start_res=START_RES, target_res=TARGET_RES)
 
-    generator = model.generator
-    generator.save(model_save_path / "FaceGAN-Generator.keras")
+    train(model,
+          start_res=START_RES,
+          target_res=TARGET_RES,
+          hyperparameters=hyperparameters,
+          dataset=dataset,
+          display_images=True,
+          callbacks=model_callbacks,
+          checkpoint_path=checkpoint_path,
+          model_save_path=model_save_path)
 
-    discriminator = model.discriminator
-    discriminator.save(model_save_path / "FaceGAN-Discriminator.keras")
-
-    with open(model_save_path / 'training_history_facegan.csv', mode='w', newline='') as file:
-        writer = csv.writer(file)
-        # Write header
-        writer.writerow(history.history.keys())
-        # Write data
-        writer.writerows(zip(*history.history.values()))
 
 
 def get_arg_parser():
@@ -119,6 +138,9 @@ def get_arg_parser():
 
     parser.add_argument('--epochs', type=int, default=20,
                         help='Number of training epochs')
+
+    parser.add_argument('--steps-per-epoch', type=int, default=5000,
+                        help='Number of steps per epoch')
 
     parser.add_argument('--batch-size', type=int, default=64,
                         help='Training batch size')
@@ -138,20 +160,6 @@ def get_arg_parser():
     parser.add_argument('--learning-rate-factor', type=float, default=0.9,
                         help='Learning rate decay factor')
 
-    parser.add_argument('--model', type=str, default='efficientnet-b0',
-                        choices=['efficientnet-b0', 'efficientnet-b4',
-                                 'resnet50', 'resnet101', 'inception', 'mobilenet'],
-                        help='Model architecture')
-
-    parser.add_argument('--freeze-base', type=bool, default=True,
-                        help='Freeze the base model for training.')
-
-    parser.add_argument('--infer-previous-model', action='store_true', default=False,
-                        help='Run inference on 8 of images using the previously trained model, before training.')
-
-    parser.add_argument('--infer-finished-model', action='store_true', default=False,
-                        help='Run inference on 8 of images using the newly trained model, after training.')
-
     return parser
 
 
@@ -163,26 +171,22 @@ if __name__ == '__main__':
     # Convert to SimpleNamespace if needed
     hyperparameters = SimpleNamespace(
         epochs=args.epochs,
+        steps_per_epoch=args.steps_per_epoch,
         batch_size=args.batch_size,
         image_dim=args.image_dim,
         latent_dim=args.latent_dim,
         learning_rate=args.learning_rate,
-        dropout_rate=args.dropout_rate,
         learning_rate_factor=args.learning_rate_factor,
-        model=args.model,
-        freeze_base=args.freeze_base,
     )
 
     print("\nRunning training with following hyperparameters:")
     print(f"\tEpochs: {hyperparameters.epochs}")
+    print(f"\tSteps per epoch: {hyperparameters.steps_per_epoch}")
     print(f"\tBatch Size: {hyperparameters.batch_size}")
     print(f"\tImage Dimensions: {hyperparameters.image_dim}")
     print(f"\tLatent Dimensions: {hyperparameters.latent_dim}")
     print(f"\tLearning Rate: {hyperparameters.learning_rate}")
-    print(f"\tDropout Rate: {hyperparameters.dropout_rate}")
     print(f"\tLearning Rate Factor: {hyperparameters.learning_rate_factor}")
-    print(f"\tModel: {hyperparameters.model}")
-    print(f"\tFreeze Base Model: {hyperparameters.freeze_base}")
     print()
 
     # Save information
@@ -197,5 +201,4 @@ if __name__ == '__main__':
         with_utk=False
     )
 
-    train_and_evaluate_hyperparameters(hyperparameters, x, y, model_save_path, args.infer_previous_model,
-                                       args.infer_finished_model)
+    train_and_evaluate_hyperparameters(hyperparameters, x, y, model_save_path)

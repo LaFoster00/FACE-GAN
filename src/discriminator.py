@@ -1,140 +1,91 @@
-from keras import models, layers, applications, metrics, losses, optimizers, callbacks, saving, ops, utils, backend
-import keras
-from keras.src.layers import LeakyReLU
-from keras.src.ops import BinaryCrossentropy
+from keras import models, layers, ops
 
-from layers import preprocessing_pipeline
-
-"""
-This module contains a multi-task deep learning model for face detection, age estimation, and gender classification. 
-The model uses a pre-trained EfficientNetB0 architecture as a base model, and is extended with custom output layers for each task.
-
-Key Features:
-- **Face Detection**: A binary classification task to detect the presence of a face in an image.
-- **Age Estimation**: A regression task to predict the age of a person in the image.
-- **Gender Classification**: A multi-class classification task to predict the gender of the person in the image.
-"""
+from layers import EqualizedConv, minibatch_std, EqualizedDense, fade_in
 
 
-# Custom loss and metric functions for the age and gender tasks.
-@keras.saving.register_keras_serializable()
-def age_loss_fn(real_true, age_true, age_pred):
-    """
-    Custom loss function for age prediction. It computes Mean Squared Error only for valid age values (age < 200).
+class Discriminator:
+    def __init__(self, start_res_log2, target_res_log2):
+        self.start_res_log2 = start_res_log2
+        self.target_res_log2 = target_res_log2
+        self.num_stages = target_res_log2 - start_res_log2 + 1
+        # filter size to use at each stage, keys are log2(resolution)
+        self.filter_nums = {
+            0: 512,
+            1: 512,
+            2: 512,  # 4x4
+            3: 512,  # 8x8
+            4: 512,  # 16x16
+            5: 512,  # 32x32
+            6: 256,  # 64x64
+            7: 128,  # 128x128
+            8: 64,  # 256x256
+            9: 32,  # 512x512
+            10: 16,
+        }  # 1024x1024
+        # list of discriminator blocks at increasing resolution
+        self.d_blocks = []
+        # list of layers to convert RGB into activation for d_blocks inputs
+        self.from_rgb = []
 
-    Args:
-    - y_true: Ground truth labels (age values).
-    - y_pred: Predicted age values.
+        for res_log2 in range(self.start_res_log2, self.target_res_log2 + 1):
+            res = 2 ** res_log2
+            filter_num = self.filter_nums[res_log2]
+            from_rgb = models.Sequential(
+                [
+                    layers.InputLayer(
+                        shape=(res, res, 3), name=f"from_rgb_input_{res}"
+                    ),
+                    EqualizedConv(filter_num, 1),
+                    layers.LeakyReLU(0.2),
+                ],
+                name=f"from_rgb_{res}",
+            )
 
-    Returns:
-    - loss: Mean squared error between true and predicted ages for valid entries.
-    """
-    age_pred = age_pred * ops.cast(ops.equal(real_true, 1), age_pred.dtype)  # Mask invalid age values (>= 200)
-    age_true = age_true * ops.cast(ops.equal(real_true, 1), age_true.dtype)
-    return losses.mean_squared_error(age_true, age_pred)
+            self.from_rgb.append(from_rgb)
 
+            input_shape = (res, res, filter_num)
+            if len(self.d_blocks) == 0:
+                d_block = self.build_base(filter_num, res)
+            else:
+                d_block = self.build_block(
+                    filter_num, self.filter_nums[res_log2 - 1], res
+                )
 
-@keras.saving.register_keras_serializable()
-def age_metric(y_true, y_pred):
-    """
-    Custom metric function for age prediction. It computes Mean Absolute Error only for valid age values (age < 200).
+            self.d_blocks.append(d_block)
 
-    Args:
-    - y_true: Ground truth labels (age values).
-    - y_pred: Predicted age values.
+    def build_base(self, filter_num, res):
+        input_tensor = layers.Input(shape=(res, res, filter_num), name=f"d_{res}")
+        x = minibatch_std(input_tensor)
+        x = EqualizedConv(filter_num, 3)(x)
+        x = layers.LeakyReLU(0.2)(x)
+        x = layers.Flatten()(x)
+        x = EqualizedDense(filter_num)(x)
+        x = layers.LeakyReLU(0.2)(x)
+        x = EqualizedDense(1)(x)
+        return models.Model(input_tensor, x, name=f"d_{res}")
 
-    Returns:
-    - metric: Mean absolute error between true and predicted ages for valid entries.
-    """
-    mask = ops.less(y_true, 200)
-    mask_pred = ops.expand_dims(mask, axis=-1)
+    def build_block(self, filter_num_1, filter_num_2, res):
+        input_tensor = layers.Input(shape=(res, res, filter_num_1), name=f"d_{res}")
+        x = EqualizedConv(filter_num_1, 3)(input_tensor)
+        x = layers.LeakyReLU(0.2)(x)
+        x = EqualizedConv(filter_num_2)(x)
+        x = layers.LeakyReLU(0.2)(x)
+        x = layers.AveragePooling2D((2, 2))(x)
+        return models.Model(input_tensor, x, name=f"d_{res}")
 
-    y_pred = ops.where(mask_pred, y_pred, ops.zeros_like(y_pred))
-    y_true = ops.where(mask, y_true, ops.zeros_like(y_true))
-    return metrics.mean_absolute_error(y_true, y_pred)
+    def grow(self, res_log2):
+        res = 2 ** res_log2
+        idx = res_log2 - self.start_res_log2
+        alpha = layers.Input(shape=(1,), name="d_alpha")
+        input_image = layers.Input(shape=(res, res, 3), name="input_image")
+        x = self.from_rgb[idx](input_image)
+        x = self.d_blocks[idx](x)
+        if idx > 0:
+            idx -= 1
+            downsized_image = layers.AveragePooling2D((2, 2))(input_image)
+            y = self.from_rgb[idx](downsized_image)
+            x = fade_in(alpha[0], x, y)
 
-
-@keras.saving.register_keras_serializable()
-def gender_loss_fn(real_true, gender_true, gender_pred):
-    """
-    Custom loss function for gender prediction. It computes Binary Cross-Entropy only for valid gender labels.
-
-    Args:
-    - y_true: Ground truth labels (gender values).
-    - y_pred: Predicted gender probabilities.
-
-    Returns:
-    - loss: Binary cross-entropy between true and predicted gender labels.
-    """
-    gender_pred = gender_pred * ops.cast(ops.equal(real_true, 1), gender_pred.dtype)  # Mask invalid gender values (>= 2)
-    gender_true = gender_true * ops.cast(ops.equal(real_true, 1), gender_true.dtype)
-    return losses.binary_crossentropy(gender_true, gender_pred)
-
-
-@keras.saving.register_keras_serializable()
-def gender_metric(y_true, y_pred):
-    """
-    Custom metric function for gender prediction. It computes Binary Accuracy only for valid gender labels.
-
-    Args:
-    - y_true: Ground truth labels (gender values).
-    - y_pred: Predicted gender probabilities.
-
-    Returns:
-    - metric: Binary accuracy between true and predicted gender labels.
-    """
-
-    mask = ops.less(y_true, 2)
-    mask_pred = ops.expand_dims(mask, axis=-1)
-
-    y_pred = ops.where(mask_pred, y_pred, ops.zeros_like(y_pred))
-    y_true = ops.where(mask, y_true, ops.zeros_like(y_true))
-    return metrics.binary_accuracy(y_true, y_pred)
-
-def discriminator_preprocessing(inputs):
-    return inputs / 255.0
-
-def get_discriminator(
-        input_shape,
-        dropout_rate=0.25,
-        model='efficientnet-b0',
-        freeze_base=True
-):
-    inputs = layers.Input(shape=input_shape)
-
-    x = layers.Conv2D(input_shape[0], kernel_size=4, strides=2, padding="same")(inputs)
-    x = layers.LeakyReLU(negative_slope=0.2)(x)
-    x = layers.Conv2D(input_shape[0] * 2, kernel_size=4, strides=2, padding="same")(x)
-    x = layers.LeakyReLU(negative_slope=0.2)(x)
-    x = layers.Conv2D(input_shape[0] * 2, kernel_size=4, strides=2, padding="same")(x)
-    x = layers.LeakyReLU(negative_slope=0.2)(x)
-    x = layers.Flatten()(x)
-    x = layers.Dropout(0.2)(x)
-    x = layers.Dense(1, activation="sigmoid")(x)
-
-    # Combine all branches into a final model
-    model = models.Model(inputs=inputs,
-                         outputs=x)
-    model.name = 'discriminator'
-    model.summary()
-
-    return model
-
-
-def compile_discriminator(discriminator, learning_rate):
-    # Compile the model with respective loss functions and metrics
-    discriminator.compile(
-        run_eagerly=False,
-        optimizer=optimizers.Adam(learning_rate=learning_rate),
-        loss={
-            'age_output': age_loss_fn,
-            'gender_output': gender_loss_fn,
-        },
-        metrics={
-            'age_output': age_metric,
-            'gender_output': gender_metric,
-        })
-
-def discriminator_loss(y_true, y_pred):
-    return losses.binary_crossentropy(y_true, y_pred)
-
+            for i in range(idx, -1, -1):
+                x = self.d_blocks[i](x)
+        return models.Model([input_image, alpha], x, name=f"discriminator_{res}_x_{res}")
