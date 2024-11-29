@@ -1,20 +1,76 @@
-from keras import models, ops, random
+from keras import models, ops, random, optimizers, backend
 import tensorflow as tf
+
+from layers import WeightedAdd
+
+from keras._tf_keras.keras.backend import set_value
+
+def define_composite(discriminators, generators):
+    model_list = []
+    # create composite models
+    for i in range(len(discriminators)):
+        g_models, d_models = generators[i], discriminators[i]
+        # straight-through model
+        d_models[0].trainable = False
+        model1 = models.Sequential()
+        model1.add(g_models[0])
+        model1.add(d_models[0])
+        model1.compile(loss='mse', optimizer=optimizers.Adam(lr=0.001, beta_1=0, beta_2=0.99, epsilon=10e-8))
+        # fade-in model
+        d_models[1].trainable = False
+        model2 = models.Sequential()
+        model2.add(g_models[1])
+        model2.add(d_models[1])
+        model2.compile(loss='mse', optimizer=optimizers.Adam(lr=0.001, beta_1=0, beta_2=0.99, epsilon=10e-8))
+        # store
+        model_list.append([model1, model2])
+    return model_list
+
+# update the alpha value on each instance of WeightedSum
+def update_fadein(models, step, n_steps):
+    # calculate current alpha (linear from 0 to 1)
+    alpha = step / float(n_steps - 1)
+    # update the alpha for each model
+    for model in models:
+        for layer in model.layers:
+            if isinstance(layer, WeightedAdd):
+                layer.alpha.assign(alpha)
+
+def train_epochs(g_model, d_model, gan_model, dataset, n_epochs, n_batch, fadein=False):
+	# calculate the number of batches per training epoch
+	bat_per_epo = int(dataset.shape[0] / n_batch)
+	# calculate the number of training iterations
+	n_steps = bat_per_epo * n_epochs
+	# calculate the size of half a batch of samples
+	half_batch = int(n_batch / 2)
+	# manually enumerate epochs
+	for i in range(n_steps):
+		# update alpha for all WeightedSum layers when fading in new blocks
+		if fadein:
+			update_fadein([g_model, d_model, gan_model], i, n_steps)
+		# prepare real and fake samples
+		X_real, y_real = generate_real_samples(dataset, half_batch)
+		X_fake, y_fake = generate_fake_samples(g_model, latent_dim, half_batch)
+		# update discriminator model
+		d_loss1 = d_model.train_on_batch(X_real, y_real)
+		d_loss2 = d_model.train_on_batch(X_fake, y_fake)
+		# update the generator via the discriminator's error
+		z_input = generate_latent_points(latent_dim, n_batch)
+		y_real2 = ones((n_batch, 1))
+		g_loss = gan_model.train_on_batch(z_input, y_real2)
+		# summarize loss on this batch
+		print('>%d, d1=%.3f, d2=%.3f g=%.3f' % (i+1, d_loss1, d_loss2, g_loss))
 
 
 class FaceGAN(models.Model):
     def __init__(
         self,
-        discriminator,
-        generator,
-        latent_dim,
+        model_list,
         discriminator_extra_steps=3,
         gp_weight=10.0,
     ):
         super().__init__()
-        self.discriminator = discriminator
-        self.generator = generator
-        self.latent_dim = latent_dim
+        self.model_list = model_list
         self.d_steps = discriminator_extra_steps
         self.gp_weight = gp_weight
 
