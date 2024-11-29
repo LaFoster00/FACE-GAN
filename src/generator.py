@@ -9,8 +9,8 @@ from utils import number_features
 
 
 def get_generator(
-        latents_in,  # First input: Latent vectors [minibatch, latent_size].
-        labels_in,  # Second input: Labels [minibatch, label_size].
+        latents_shape=(64, ),  # First input: Latent vectors [minibatch, latent_size].
+        labels_shape=(2,),  # Second input: Labels [minibatch, label_size].
         num_channels=3,  # Number of output color channels. Overridden based on dataset.
         resolution=32,  # Output resolution. Overridden based on dataset.
         label_size=0,  # Dimensionality of the labels, 0 if no labels. Overridden based on dataset.
@@ -24,6 +24,8 @@ def get_generator(
         structure=None,  # 'linear' = human-readable, 'recursive' = efficient, None = select automatically.
         is_template_graph=False,  # True = template graph constructed by the Network class, False = actual evaluation.
 ):
+    latents_in = layers.Input(shape=latents_shape, name='latents_in')
+    labels_in = layers.Input(shape=labels_shape, name='labels_in')
     resolution_log2 = int(np.log2(resolution))
 
     def nf(log2res):
@@ -100,4 +102,5 @@ def get_generator(
         images_out = grow(combo_in, 2, resolution_log2 - 2)
 
     images_out = layers.Identity(name='images_out')(images_out)
-    return images_out
+    model = models.Model(inputs=[latents_in, labels_in], outputs=images_out)
+    return model

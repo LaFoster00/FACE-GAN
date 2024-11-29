@@ -1,4 +1,4 @@
-from keras import models, layers, models, ops, backend
+from keras import models, layers, models, ops, backend, utils
 import keras
 
 from layers import WeightedAdd
@@ -10,9 +10,7 @@ from utils import number_features, lerp_clip, cset, lerp
 
 
 def get_discriminator_model(
-    images_in,                          # Input: Images [minibatch, height, width, channel].
-    num_channels        = 1,            # Number of input color channels. Overridden based on dataset.
-    resolution          = 32,           # Input resolution. Overridden based on dataset.
+    shape_in=(32, 32, 3),                          # Input: Images [minibatch, height, width, channel].
     label_size          = 0,            # Dimensionality of the labels, 0 if no labels. Overridden based on dataset.
     fmap_base           = 8192,         # Overall multiplier for the number of feature maps.
     fmap_decay          = 1.0,          # log2 feature map reduction when doubling the resolution.
@@ -20,18 +18,20 @@ def get_discriminator_model(
     structure           = None,         # 'linear' = human-readable, 'recursive' = efficient, None = select automatically
     is_template_graph   = False,        # True = template graph constructed by the Network class, False = actual evaluation.
 ):
+    images_in = layers.Input(shape=shape_in)
+    resolution = shape_in[0]
     resolution_log2 = int(np.log2(resolution))
     assert resolution == 2**resolution_log2 and resolution >= 4
     def nf(log2res):
         return number_features(log2res, fmap_base, fmap_decay, fmap_max)
     def downscale2D(x, factor=2):
         # TODO check if strides is correct it might need to be (1,1)
-        return layers.AveragePooling2D(pool_size=(factor, factor), strides=(factor, factor), padding='valid',data_format='channel_first')(x)
+        return layers.AveragePooling2D(pool_size=(factor, factor), strides=(factor, factor), padding='valid',data_format='channels_last')(x)
     def fromrgb(x, log2res):
         return FromRGB(log2res, fmap_base, fmap_decay, fmap_max)(x)
     if structure is None: structure = 'linear' if is_template_graph else 'recursive'
 
-    lod_in = ops.cast(keras.Variable('lod', initializer=np.float32(0.0), trainable=False), backend.floatx())
+    lod_in = ops.cast(keras.Variable(name='lod', initializer=np.float32(0.0), dtype=np.float32, trainable=False), backend.floatx())
 
     def discriminator_block(x, log2res):
         if log2res >= 3: # 8x8 and up
@@ -83,7 +83,7 @@ def get_discriminator_model(
     # Recursive structure: complex but efficient.
     if structure == 'recursive':
         def grow(res, lod):
-            x = lambda: fromrgb(downscale2D(img, 2**lod), res)
+            x = lambda: fromrgb(downscale2D(images_in, 2**lod), res)
             if lod > 0: x = cset(x, (lod_in < lod), lambda: grow(res + 1, lod - 1))
             x = discriminator_block(x(), res); y = lambda: x
             if res > 2: y = cset(y, (lod_in > lod), lambda: lerp(x, fromrgb(downscale2D(images_in, 2**(lod+1)), res - 1), lod_in - lod))
@@ -92,8 +92,17 @@ def get_discriminator_model(
 
     scores_out = layers.Identity(name='score_out')(combo_out[:, :1])
     labels_out = layers.Identity(name='labels_out')(combo_out[:, 1:])
-    return scores_out, labels_out
 
+    model = models.Model(inputs=images_in, outputs=[scores_out, labels_out], name='discriminator')
+    return model
 
-
-
+if __name__ == '__main__':
+    model = get_discriminator_model()
+    model.summary()
+    utils.plot_model(
+        model,
+        to_file='discriminator.png',
+        show_shapes=True,
+        show_dtype=True,
+        show_layer_names=True,
+    )
