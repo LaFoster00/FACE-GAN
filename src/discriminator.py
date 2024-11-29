@@ -1,90 +1,91 @@
-from keras import layers, models, optimizers, utils
-import keras
-
-from layers import WeightedAdd
-
-# add a discriminator block
-def add_discriminator_block(old_model, n_input_layers=3):
-	# get shape of existing model
-	in_shape = old_model.input.shape
-	# define new input shape as double the size
-	input_shape = (in_shape[-2] *2, in_shape[-2] *2, in_shape[-1])
-	in_image = layers.Input(shape=input_shape)
-	# define new input processing layer
-	d = layers.Conv2D(64, (1,1), padding='same', kernel_initializer='he_normal')(in_image)
-	d = layers.LeakyReLU(alpha=0.2)(d)
-	# define new block
-	d = layers.Conv2D(64, (3,3), padding='same', kernel_initializer='he_normal')(d)
-	d = layers.BatchNormalization()(d)
-	d = layers.LeakyReLU(alpha=0.2)(d)
-	d = layers.Conv2D(64, (3,3), padding='same', kernel_initializer='he_normal')(d)
-	d = layers.BatchNormalization()(d)
-	d = layers.LeakyReLU(alpha=0.2)(d)
-	d = layers.AveragePooling2D(pool_size=(2,2))(d)
-	block_new = d
-	# skip the input, 1x1 and activation for the old model
-	for i in range(n_input_layers, len(old_model.layers)):
-		d = old_model.layers[i](d)
-	# define straight-through model
-	model1 = models.Model(in_image, d)
-	# compile model
-	model1.compile(loss='mse', optimizer=optimizers.Adam(learning_rate=0.001, beta_1=0, beta_2=0.99, epsilon=10e-8))
-	# downsample the new larger image
-	downsample = layers.AveragePooling2D(pool_size=(2,2))(in_image)
-	# connect old input processing to downsampled new input
-	block_old = old_model.layers[1](downsample)
-	block_old = old_model.layers[2](block_old)
-	# fade in output of old model input layer with new input
-	d = WeightedAdd()([block_old, block_new])
-	# skip the input, 1x1 and activation for the old model
-	for i in range(n_input_layers, len(old_model.layers)):
-		d = old_model.layers[i](d)
-	# define straight-through model
-	model2 = models.Model(in_image, d)
-	# compile model
-	model2.compile(loss='mse', optimizer=optimizers.Adam(learning_rate=0.001, beta_1=0, beta_2=0.99, epsilon=10e-8))
-	return [model1, model2]
+from keras import layers, models, ops
+from layers import fade_in
 
 
-# define the discriminator models for each image resolution
-def define_discriminator(n_blocks, input_shape=(4,4,3)):
-	model_list = list()
-	# base model input
-	in_image = layers.Input(shape=input_shape)
-	# conv 1x1
-	d = layers.Conv2D(64, (1,1), padding='same', kernel_initializer='he_normal')(in_image)
-	d = layers.LeakyReLU(alpha=0.2)(d)
-	# conv 3x3 (output block)
-	d = layers.Conv2D(128, (3,3), padding='same', kernel_initializer='he_normal')(d)
-	d = layers.BatchNormalization()(d)
-	d = layers.LeakyReLU(alpha=0.2)(d)
-	# conv 4x4
-	d = layers.Conv2D(128, (4,4), padding='same', kernel_initializer='he_normal')(d)
-	d = layers.BatchNormalization()(d)
-	d = layers.LeakyReLU(alpha=0.2)(d)
-	# dense output layer
-	d = layers.Flatten()(d)
-	out_class = layers.Dense(1)(d)
-	# define model
-	model = keras.models.Model(in_image, out_class)
-	# compile model
-	model.compile(loss='mse', optimizer=optimizers.Adam(learning_rate=0.001, beta_1=0, beta_2=0.99, epsilon=10e-8))
-	# store model
-	model_list.append([model, model])
-	# create submodels
-	for i in range(1, n_blocks):
-		# get prior model without the fade-on
-		old_model = model_list[i - 1][0]
-		# create new model for next resolution
-		models = add_discriminator_block(old_model)
-		# store model
-		model_list.append(models)
-	return model_list
+class Discriminator:
+	def __init__(self, start_res_log2, target_res_log2):
+		self.start_res_log2 = start_res_log2
+		self.target_res_log2 = target_res_log2
+		self.num_stages = target_res_log2 - start_res_log2 + 1
+		# filter size to use at each stage, keys are log2(resolution)
+		self.filter_nums = {
+			0: 512,
+			1: 512,
+			2: 512,  # 4x4
+			3: 512,  # 8x8
+			4: 512,  # 16x16
+			5: 512,  # 32x32
+			6: 256,  # 64x64
+			7: 128,  # 128x128
+			8: 64,  # 256x256
+			9: 32,  # 512x512
+			10: 16,
+		}  # 1024x1024
+		# list of discriminator blocks at increasing resolution
+		self.d_blocks = []
+		# list of layers to convert RGB into activation for d_blocks inputs
+		self.from_rgb = []
 
-if __name__ == '__main__':
-	# define models
-	discriminators = define_discriminator(3)
-	# spot check
-	m = discriminators[2][1]
-	m.summary()
-	utils.plot_model(m, to_file='discriminator_plot.png', show_shapes=True, show_layer_names=True)
+		for res_log2 in range(self.start_res_log2, self.target_res_log2 + 1):
+			res = 2 ** res_log2
+			filter_num = self.filter_nums[res_log2]
+			from_rgb = models.Sequential(
+				[
+					layers.InputLayer(
+						input_shape=(res, res, 3), name=f"from_rgb_input_{res}"
+					),
+					layers.Conv2D(filter_num, 1),
+					layers.LeakyReLU(0.2),
+				],
+				name=f"from_rgb_{res}",
+			)
+
+			self.from_rgb.append(from_rgb)
+
+			input_shape = (res, res, filter_num)
+			if len(self.d_blocks) == 0:
+				d_block = self.build_base(filter_num, res)
+			else:
+				d_block = self.build_block(
+					filter_num, self.filter_nums[res_log2 - 1], res
+				)
+
+			self.d_blocks.append(d_block)
+
+
+	def build_base(self, filter_num, res):
+		input_tensor = layers.Input(shape=(res, res, filter_num), name=f"d_{res}")
+		x = layers.BatchNormalization()(input_tensor)
+		x = layers.Conv2D(filter_num, 3)(x)
+		x = layers.LeakyReLU(0.2)(x)
+		x = layers.Flatten()(x)
+		x = layers.Dense(filter_num)(x)
+		x = layers.LeakyReLU(0.2)(x)
+		x = layers.Dense(1)(x)
+		return models.Model(inputs=input_tensor, outputs=x, name=f"d_{res}")
+
+	def build_block(self, filter_num_1, filter_num_2, res):
+		input_tensor = layers.Input(shape=(res, res, filter_num_1), name=f"d_{res}")
+		x = layers.Conv2D(filter_num_1,1, 3)(input_tensor)
+		x = layers.LeakyReLU(0.2)(x)
+		x = layers.Conv2D(filter_num_2, 3)(x)
+		x = layers.LeakyReLU(0.2)(x)
+		x = layers.AveragePooling2D((2, 2))(x)
+		return models.Model(inputs=input_tensor, outputs=x, name=f"d_{res}")
+
+	def grow(self, res_log2):
+		res = 2 ** res_log2
+		idx = res_log2 - self.start_res_log2
+		alpha = layers.Input(shape=(1,), name="d_alpha")
+		input_image = layers.Input(shape=(res, res, 3), name="input_image")
+		x = self.from_rgb[idx](input_image)
+		x = self.d_blocks[idx](x)
+		if idx > 0:
+			idx -= 1
+			downsized_image = layers.AveragePooling2D((2, 2))(input_image)
+			y = self.from_rgb[idx](downsized_image)
+			x = fade_in(alpha[0], x, y)
+
+			for i in range(idx, -1, -1):
+				x = self.d_blocks[i](x)
+		return models.Model(inputs=[input_image, alpha], outputs=x, name=f"discriminator_{res}_x_{res}")

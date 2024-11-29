@@ -2,8 +2,6 @@ import numpy as np
 from keras import layers, ops
 import keras
 
-from utils import number_features
-
 
 # Custom Keras layer to randomly convert an image to grayscale during training
 @keras.saving.register_keras_serializable()
@@ -54,45 +52,88 @@ def preprocessing_pipeline(inputs, preprocessing):
     x = preprocessing(x)
     return x
 
-# Used to face in the new layer when increasing the convolution size
-def fade_in(a, b, alpha):
-    return ((1 - alpha) * a) + (alpha * b)
+def fade_in(alpha, a, b):
+    return alpha * a + (1.0 - alpha) * b
 
-# Weighted add off two tensors of same shape
-class WeightedAdd(layers.Add):
-    def __init__(self, alpha=0.0, **kwargs):
-        super().__init__(**kwargs)
-        self.alpha = keras.Variable(alpha, name='ws_alpha')
 
-    #Output a weighted addition of inputs
-    def _merge_function(self, inputs):
-        # only supports a weighted sum of two inputs
-        assert(len(inputs) == 2)
-        return fade_in(inputs[0], inputs[1], alpha=self.alpha)
+def wasserstein_loss(y_true, y_pred):
+    return -ops.mean(y_true * y_pred)
 
-class PixelNorm(layers.Layer):
-    def __init__(self, epsilon=1e-8,**kwargs):
-        super().__init__(**kwargs)
-        self.epsilon = keras.Variable(epsilon)
+
+def pixel_norm(x, epsilon=1e-8):
+    return x / ops.sqrt(ops.mean(x ** 2, axis=-1, keepdims=True) + epsilon)
+
+class AddNoise(layers.Layer):
+    def build(self, input_shape):
+        n, h, w, c = input_shape[0]
+        initializer = keras.initializers.RandomNormal(mean=0.0, stddev=1.0)
+        self.b = self.add_weight(
+            shape=(1, 1, 1, c), initializer=initializer, name="kernel", trainable=True
+        )
 
     def call(self, inputs):
-        return inputs * ops.rsqrt(ops.mean(ops.square(inputs), axis=1, keepdims=True) + self.epsilon)
+        x, noise = inputs
+        output = x + self.b * noise
+        return output
 
-class ToRGB(layers.Conv2D):
-    def __init__(self, log2res, num_channels, **kwargs):
-        super().__init__(
-            filters=num_channels,
-            kernel_size=(1, 1),
-            strides=(1, 1),
-            padding='same',
-            name=f"ToRGB_{log2res}",
-            **kwargs)
+class EqualizedConv(layers.Layer):
+    def __init__(self, out_channels, kernel=3, gain=2, **kwargs):
+        super().__init__(**kwargs)
+        self.kernel = kernel
+        self.out_channels = out_channels
+        self.gain = gain
+        self.pad = kernel != 1
 
-class FromRGB(layers.Conv2D):
-    def __init__(self, log2res, fmap_base=8192, fmap_decay=1.0, fmap_max=512, **kwargs):
-        super().__init__(
-            filters=number_features(log2res, fmap_base, fmap_decay, fmap_max),
-            kernel_size=(1, 1),
-            strides=(1,1),
-            name=f"FromRGB_{log2res}",
-            **kwargs)
+    def build(self, input_shape):
+        self.in_channels = input_shape[-1]
+        initializer = keras.initializers.RandomNormal(mean=0.0, stddev=1.0)
+        self.w = self.add_weight(
+            shape=[self.kernel, self.kernel, self.in_channels, self.out_channels],
+            initializer=initializer,
+            trainable=True,
+            name="kernel",
+        )
+        self.b = self.add_weight(
+            shape=(self.out_channels,), initializer="zeros", trainable=True, name="bias"
+        )
+        fan_in = self.kernel * self.kernel * self.in_channels
+        self.scale = ops.sqrt(self.gain / fan_in)
+
+    def call(self, inputs):
+        if self.pad:
+            x = ops.pad(inputs, [[0, 0], [1, 1], [1, 1], [0, 0]], mode="REFLECT")
+        else:
+            x = inputs
+        output = (
+            ops.conv(x, self.scale * self.w, strides=1, padding="valid") + self.b
+        )
+        return output
+
+
+class EqualizedDense(layers.Layer):
+    def __init__(self, units, gain=2, learning_rate_multiplier=1, **kwargs):
+        super().__init__(**kwargs)
+        self.units = units
+        self.gain = gain
+        self.learning_rate_multiplier = learning_rate_multiplier
+
+    def build(self, input_shape):
+        self.in_channels = input_shape[-1]
+        initializer = keras.initializers.RandomNormal(
+            mean=0.0, stddev=1.0 / self.learning_rate_multiplier
+        )
+        self.w = self.add_weight(
+            shape=[self.in_channels, self.units],
+            initializer=initializer,
+            trainable=True,
+            name="kernel",
+        )
+        self.b = self.add_weight(
+            shape=(self.units,), initializer="zeros", trainable=True, name="bias"
+        )
+        fan_in = self.in_channels
+        self.scale = ops.sqrt(self.gain / fan_in)
+
+    def call(self, inputs):
+        output = ops.add(ops.matmul(inputs, self.scale * self.w), self.b)
+        return output * self.learning_rate_multiplier
