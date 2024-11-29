@@ -1,108 +1,90 @@
-from keras import models, layers, models, ops, backend, utils
+from keras import layers, models, optimizers, utils
 import keras
 
 from layers import WeightedAdd
-import numpy as np
 
-from layers import FromRGB, PixelNorm
+# add a discriminator block
+def add_discriminator_block(old_model, n_input_layers=3):
+	# get shape of existing model
+	in_shape = old_model.input.shape
+	# define new input shape as double the size
+	input_shape = (in_shape[-2] *2, in_shape[-2] *2, in_shape[-1])
+	in_image = layers.Input(shape=input_shape)
+	# define new input processing layer
+	d = layers.Conv2D(64, (1,1), padding='same', kernel_initializer='he_normal')(in_image)
+	d = layers.LeakyReLU(alpha=0.2)(d)
+	# define new block
+	d = layers.Conv2D(64, (3,3), padding='same', kernel_initializer='he_normal')(d)
+	d = layers.BatchNormalization()(d)
+	d = layers.LeakyReLU(alpha=0.2)(d)
+	d = layers.Conv2D(64, (3,3), padding='same', kernel_initializer='he_normal')(d)
+	d = layers.BatchNormalization()(d)
+	d = layers.LeakyReLU(alpha=0.2)(d)
+	d = layers.AveragePooling2D(pool_size=(2,2))(d)
+	block_new = d
+	# skip the input, 1x1 and activation for the old model
+	for i in range(n_input_layers, len(old_model.layers)):
+		d = old_model.layers[i](d)
+	# define straight-through model
+	model1 = models.Model(in_image, d)
+	# compile model
+	model1.compile(loss='mse', optimizer=optimizers.Adam(learning_rate=0.001, beta_1=0, beta_2=0.99, epsilon=10e-8))
+	# downsample the new larger image
+	downsample = layers.AveragePooling2D(pool_size=(2,2))(in_image)
+	# connect old input processing to downsampled new input
+	block_old = old_model.layers[1](downsample)
+	block_old = old_model.layers[2](block_old)
+	# fade in output of old model input layer with new input
+	d = WeightedAdd()([block_old, block_new])
+	# skip the input, 1x1 and activation for the old model
+	for i in range(n_input_layers, len(old_model.layers)):
+		d = old_model.layers[i](d)
+	# define straight-through model
+	model2 = models.Model(in_image, d)
+	# compile model
+	model2.compile(loss='mse', optimizer=optimizers.Adam(learning_rate=0.001, beta_1=0, beta_2=0.99, epsilon=10e-8))
+	return [model1, model2]
 
-from utils import number_features, lerp_clip, cset, lerp
 
-
-def get_discriminator_model(
-    shape_in=(32, 32, 3),                          # Input: Images [minibatch, height, width, channel].
-    label_size          = 0,            # Dimensionality of the labels, 0 if no labels. Overridden based on dataset.
-    fmap_base           = 8192,         # Overall multiplier for the number of feature maps.
-    fmap_decay          = 1.0,          # log2 feature map reduction when doubling the resolution.
-    fmap_max            = 512,          # Maximum number of feature maps in any layer.
-    structure           = None,         # 'linear' = human-readable, 'recursive' = efficient, None = select automatically
-    is_template_graph   = False,        # True = template graph constructed by the Network class, False = actual evaluation.
-):
-    images_in = layers.Input(shape=shape_in)
-    resolution = shape_in[0]
-    resolution_log2 = int(np.log2(resolution))
-    assert resolution == 2**resolution_log2 and resolution >= 4
-    def nf(log2res):
-        return number_features(log2res, fmap_base, fmap_decay, fmap_max)
-    def downscale2D(x, factor=2):
-        # TODO check if strides is correct it might need to be (1,1)
-        return layers.AveragePooling2D(pool_size=(factor, factor), strides=(factor, factor), padding='valid',data_format='channels_last')(x)
-    def fromrgb(x, log2res):
-        return FromRGB(log2res, fmap_base, fmap_decay, fmap_max)(x)
-    if structure is None: structure = 'linear' if is_template_graph else 'recursive'
-
-    lod_in = ops.cast(keras.Variable(name='lod', initializer=np.float32(0.0), dtype=np.float32, trainable=False), backend.floatx())
-
-    def discriminator_block(x, log2res):
-        if log2res >= 3: # 8x8 and up
-            x = layers.Conv2D(
-                filters=nf(log2res - 1),
-                kernel_size=(3, 3),
-                strides=(1, 1),
-                padding='same',
-                data_format='channels_last')(x)
-            x = layers.LeakyReLU(negative_slope=0.2)(x)
-            x = layers.Conv2D(
-                filters=nf(log2res - 2),
-                kernel_size=(3, 3),
-                strides=(1, 1),
-                padding='same',
-                data_format='channels_last')(x)
-            x = layers.LeakyReLU(negative_slope=0.2)(x)
-            x = downscale2D(x)
-        else: # 4x4
-            x = layers.Conv2D(
-                filters=nf(log2res - 1),
-                kernel_size=(3, 3),
-                strides=(1, 1),
-                padding='same',
-                data_format='channels_last')(x)
-            x = layers.LeakyReLU(negative_slope=0.2)(x)
-            x = layers.Conv2D(
-                filters=nf(log2res - 2),
-                kernel_size=(3, 3),
-                strides=(1, 1),
-                padding='same',
-                data_format='channels_last')(x)
-            x = layers.LeakyReLU(negative_slope=0.2)(x)
-            x = layers.Dense(1+label_size)(x)
-        return x
-
-    # Linear structure: simple but inefficient
-    if structure == 'linear':
-        img = images_in
-        x = fromrgb(img, resolution_log2)
-        for res in range(resolution_log2, 2, -1):
-            lod = resolution_log2 - res
-            x = discriminator_block(x, res)
-            img = downscale2D(img)
-            y = fromrgb(img, res - 1)
-            x = lerp_clip(x, y, lod_in - lod)
-        combo_out = discriminator_block(x, 2)
-
-    # Recursive structure: complex but efficient.
-    if structure == 'recursive':
-        def grow(res, lod):
-            x = lambda: fromrgb(downscale2D(images_in, 2**lod), res)
-            if lod > 0: x = cset(x, (lod_in < lod), lambda: grow(res + 1, lod - 1))
-            x = discriminator_block(x(), res); y = lambda: x
-            if res > 2: y = cset(y, (lod_in > lod), lambda: lerp(x, fromrgb(downscale2D(images_in, 2**(lod+1)), res - 1), lod_in - lod))
-            return y()
-        combo_out = grow(2, resolution_log2 - 2)
-
-    scores_out = layers.Identity(name='score_out')(combo_out[:, :1])
-    labels_out = layers.Identity(name='labels_out')(combo_out[:, 1:])
-
-    model = models.Model(inputs=images_in, outputs=[scores_out, labels_out], name='discriminator')
-    return model
+# define the discriminator models for each image resolution
+def define_discriminator(n_blocks, input_shape=(4,4,3)):
+	model_list = list()
+	# base model input
+	in_image = layers.Input(shape=input_shape)
+	# conv 1x1
+	d = layers.Conv2D(64, (1,1), padding='same', kernel_initializer='he_normal')(in_image)
+	d = layers.LeakyReLU(alpha=0.2)(d)
+	# conv 3x3 (output block)
+	d = layers.Conv2D(128, (3,3), padding='same', kernel_initializer='he_normal')(d)
+	d = layers.BatchNormalization()(d)
+	d = layers.LeakyReLU(alpha=0.2)(d)
+	# conv 4x4
+	d = layers.Conv2D(128, (4,4), padding='same', kernel_initializer='he_normal')(d)
+	d = layers.BatchNormalization()(d)
+	d = layers.LeakyReLU(alpha=0.2)(d)
+	# dense output layer
+	d = layers.Flatten()(d)
+	out_class = layers.Dense(1)(d)
+	# define model
+	model = keras.models.Model(in_image, out_class)
+	# compile model
+	model.compile(loss='mse', optimizer=optimizers.Adam(learning_rate=0.001, beta_1=0, beta_2=0.99, epsilon=10e-8))
+	# store model
+	model_list.append([model, model])
+	# create submodels
+	for i in range(1, n_blocks):
+		# get prior model without the fade-on
+		old_model = model_list[i - 1][0]
+		# create new model for next resolution
+		models = add_discriminator_block(old_model)
+		# store model
+		model_list.append(models)
+	return model_list
 
 if __name__ == '__main__':
-    model = get_discriminator_model()
-    model.summary()
-    utils.plot_model(
-        model,
-        to_file='discriminator.png',
-        show_shapes=True,
-        show_dtype=True,
-        show_layer_names=True,
-    )
+	# define models
+	discriminators = define_discriminator(3)
+	# spot check
+	m = discriminators[2][1]
+	m.summary()
+	utils.plot_model(m, to_file='discriminator_plot.png', show_shapes=True, show_layer_names=True)
