@@ -30,12 +30,22 @@ def upsample_block(
 def get_generator(num_channels, image_dim):
     input = layers.Input(shape=(num_channels,))
 
-    num_conv = 3
+    num_conv = 4
     upscale_dim = int(image_dim / (2**num_conv))
 
     x = layers.Dense(upscale_dim * upscale_dim * num_channels)(input)
     x = layers.LeakyReLU(negative_slope=0.2)(x)
     x = layers.Reshape((upscale_dim, upscale_dim, num_channels))(x)
+    x = upsample_block(
+        x,
+        256,
+        layers.LeakyReLU(0.2),
+        strides=(1, 1),
+        use_bias=False,
+        use_bn=True,
+        padding="same",
+        use_dropout=False,
+    )
     x = upsample_block(
         x,
         128,

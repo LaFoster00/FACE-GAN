@@ -17,8 +17,7 @@ from generator import get_generator
 from face_gan import FaceGAN
 
 
-def train_and_evaluate_hyperparameters(hyperparameters, x, y, model_save_path, infer_previous_model,
-                                       infer_finished_model):
+def train_and_evaluate_hyperparameters(hyperparameters, x, y, model_save_path):
     # Data information
     label_structure = ['age_output', 'gender_output']
 
@@ -55,7 +54,7 @@ def train_and_evaluate_hyperparameters(hyperparameters, x, y, model_save_path, i
         generator=generator,
         discriminator=discriminator,
         latent_dim=hyperparameters.latent_dim,
-        discriminator_extra_steps=3,
+        discriminator_extra_steps=5,
     )
 
     model.compile(
@@ -135,12 +134,6 @@ def get_arg_parser():
     parser.add_argument('--learning-rate-factor', type=float, default=0.9,
                         help='Learning rate decay factor')
 
-    parser.add_argument('--infer-previous-model', action='store_true', default=False,
-                        help='Run inference on 8 of images using the previously trained model, before training.')
-
-    parser.add_argument('--infer-finished-model', action='store_true', default=False,
-                        help='Run inference on 8 of images using the newly trained model, after training.')
-
     return parser
 
 
@@ -182,5 +175,4 @@ if __name__ == '__main__':
         with_utk=False
     )
 
-    train_and_evaluate_hyperparameters(hyperparameters, x, y, model_save_path, args.infer_previous_model,
-                                       args.infer_finished_model)
+    train_and_evaluate_hyperparameters(hyperparameters, x, y, model_save_path)
