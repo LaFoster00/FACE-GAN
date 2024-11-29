@@ -1,7 +1,8 @@
 from keras import models, layers, ops, backend, random
 import keras
-import tensorflow as tf
 import numpy as np
+
+from tensorflow import GradientTape
 
 from utils import log2
 from layers import wasserstein_loss
@@ -103,7 +104,7 @@ class StyleGAN(models.Model):
         noise = self.generate_noise(batch_size)
 
         # generator
-        with tf.GradientTape() as g_tape:
+        with GradientTape() as g_tape:
             w = self.mapping(z)
             fake_images = self.generator([const_input, w, noise, alpha])
             pred_fake = self.discriminator([fake_images, alpha])
@@ -116,7 +117,7 @@ class StyleGAN(models.Model):
             self.g_optimizer.apply_gradients(zip(gradients, trainable_weights))
 
         # discriminator
-        with tf.GradientTape() as gradient_tape, tf.GradientTape() as total_tape:
+        with GradientTape() as gradient_tape, GradientTape() as total_tape:
             # forward pass
             pred_fake = self.discriminator([fake_images, alpha])
             pred_real = self.discriminator([real_images, alpha])

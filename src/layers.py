@@ -2,8 +2,6 @@ import numpy as np
 from keras import layers, ops
 import keras
 
-import tensorflow as tf
-
 # Custom Keras layer to randomly convert an image to grayscale during training
 @keras.saving.register_keras_serializable()
 class RandomGrayscale(layers.Layer):
@@ -110,7 +108,7 @@ class EqualizedConv(layers.Layer):
         else:
             x = inputs
         output = (
-            tf.nn.conv2d(x, self.scale * self.w, strides=1, padding="VALID") + self.b
+            ops.conv(x, self.scale * self.w, strides=1, padding="VALID")+ self.b
         )
         return output
 
@@ -144,7 +142,7 @@ class EqualizedDense(layers.Layer):
         # Dynamically compute scaled weights
         scaled_w = self.w * self.scale
         # Perform matrix multiplication and bias addition
-        output = tf.matmul(inputs, scaled_w) + self.b
+        output = ops.matmul(inputs, scaled_w) + self.b
         return output * self.learning_rate_multiplier
 
 

@@ -1,8 +1,10 @@
+import os
+os.environ['CUDA_VISIBLE_DEVICES']='-1'
+
 import wandb
 from wandb.integration.keras import WandbMetricsLogger
 from sklearn import model_selection
-from keras import optimizers, losses, callbacks, utils
-import tensorflow as tf
+from keras import optimizers, losses, callbacks, utils, random
 import keras
 import numpy as np
 
@@ -37,7 +39,7 @@ def train(
     opt_cfg = {"learning_rate": hyperparameters.learning_rate, "beta_1": 0.0, "beta_2": 0.99, "epsilon": 1e-8}
 
     val_batch_size = 16
-    val_z = tf.random.normal((val_batch_size, model.z_dim))
+    val_z = random.normal((val_batch_size, model.z_dim))
     val_noise = model.generate_noise(val_batch_size)
 
     start_res_log2 = int(np.log2(start_res))
