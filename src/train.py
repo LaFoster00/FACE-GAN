@@ -58,8 +58,8 @@ def train_and_evaluate_hyperparameters(hyperparameters, x, y, model_save_path):
     )
 
     model.compile(
-        d_optimizer=optimizers.Adam(learning_rate=hyperparameters.learning_rate, beta_1=0.5, beta_2=0.9),
-        g_optimizer=optimizers.Adam(learning_rate=hyperparameters.learning_rate, beta_1=0.5, beta_2=0.9),
+        d_optimizer=optimizers.Adam(learning_rate=hyperparameters.learning_rate),
+        g_optimizer=optimizers.Adam(learning_rate=hyperparameters.learning_rate),
         d_loss_fn=discriminator_loss,
         g_loss_fn=generator_loss,
         run_eagerly=False,
@@ -113,7 +113,7 @@ def train_and_evaluate_hyperparameters(hyperparameters, x, y, model_save_path):
 def get_arg_parser():
     parser = argparse.ArgumentParser(description='Training hyperparameters')
 
-    parser.add_argument('--epochs', type=int, default=20,
+    parser.add_argument('--epochs', type=int, default=200,
                         help='Number of training epochs')
 
     parser.add_argument('--batch-size', type=int, default=64,
