@@ -29,7 +29,7 @@ def create_dataset_labels(
     mapped_labels = []
     for index, image in enumerate(images_mapped):
         image_labels = labels[index]
-        mapped_labels.append([Path(image).name, image_labels[1], image_labels[2]])
+        mapped_labels.append([Path(image).name, [image_labels[1], image_labels[2]]])
     dataset_dict["labels"] = mapped_labels
     with open(target / "dataset.json", "w", encoding='utf-8') as f:
         json.dump(dataset_dict, f, ensure_ascii=False, indent=4)
