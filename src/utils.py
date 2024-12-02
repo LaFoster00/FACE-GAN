@@ -15,13 +15,13 @@ def append_list(a, b):
     for i in range(len(b)):
         a.append(b[i])
 
-def generate_ffhq_labels(image_paths):
+def generate_ffhq_labels(image_paths, serialization = False):
     # Check if the jsons already exist in a serialized form
     serialized_feature_json_dir = Path(__file__).parent / '../data/tmp'
     serialized_feature_json_dir.mkdir(parents=True, exist_ok=True)
     serialized_feature_json_id = "features_json.pickle"
     print(f"Trying to deserialize feature json from {serialized_feature_json_dir/serialized_feature_json_id}")
-    if os.path.exists(serialized_feature_json_dir / serialized_feature_json_id):
+    if os.path.exists(serialized_feature_json_dir / serialized_feature_json_id) and serialization:
         feature_jsons = pickle.load(open(serialized_feature_json_dir / serialized_feature_json_id, "rb"))
         print("Successfully deserialized feature json")
     else:
@@ -42,7 +42,7 @@ def generate_ffhq_labels(image_paths):
                     print(f"{missing_jsons}: {feature_json_id} has no features.")
 
 
-    if not os.path.exists(serialized_feature_json_dir / serialized_feature_json_id):
+    if not os.path.exists(serialized_feature_json_dir / serialized_feature_json_id) and serialization:
         print("Serializing features json")
         pickle.dump(
             feature_jsons,
