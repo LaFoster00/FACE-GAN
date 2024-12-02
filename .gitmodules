@@ -1,6 +1,3 @@
 [submodule "third_party/ffhq-features-dataset"]
 	path = third_party/ffhq-features-dataset
 	url = git@github.com:DCGM/ffhq-features-dataset.git
-[submodule "third_party/stylegan3"]
-	path = third_party/stylegan3
-	url = https://github.com/NVlabs/stylegan3.git
