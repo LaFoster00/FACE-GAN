@@ -2,9 +2,25 @@
 FACE-GAN: Facial Appearance Creation &amp; Enhancement using GANs.
 
 ## Requirements
-* Install the requirements using `requirements.txt` and pip.
-  * `pip install -r requirements.txt`
-* Download stylegan3 and set it up.
+### FACE-GAN
+* Linux is supported.
+* 1&ndash;8 high-end NVIDIA GPUs with at least 12 GB of memory.
+* 64-bit Python 3.8 and PyTorch 1.9.0 (or later). See https://pytorch.org for PyTorch install instructions.
+* CUDA toolkit 11.1 or later.
+* GCC 7 or later (Linux) or Visual Studio (Windows) compilers.  Recommended GCC version depends on CUDA version, see for example [CUDA 11.4 system requirements](https://docs.nvidia.com/cuda/archive/11.4.1/cuda-installation-guide-linux/index.html#system-requirements).
+* Python libraries: see [environment.yml](./environment.yml) for exact library dependencies.  You can use the following commands with Miniconda3 to create and activate your StyleGAN3 Python environment:
+  - `conda env create -f environment.yml`
+  - `conda activate FACE-GAN`
+
+### Stylegan3
+You will also need stylegan3 to generate the images.
+* Clone stylegan3 to another directory
+* Export stylegans dnnlib and torch_utils directories to PYTHONPATH
+  * `export PYTHONPATH="PathToStylegan3"/dnnlib:${PYTHONPATH}`
+  * `export PYTHONPATH="PathToStylegan3"/torch_utils:${PYTHONPATH}`
+* In case you use the conda environemnt activate it and add the dependencies with this command
+  * `conda-develop "PathToStylegan3"/dnnlib`
+  * `conda-develop ""PathToStylegan3"/torch_utils`
 
 ## Getting started
 1. Download the ffhq dataset using the ```data_downloader.py``` script.
