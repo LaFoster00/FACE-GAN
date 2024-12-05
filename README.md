@@ -16,11 +16,9 @@ FACE-GAN: Facial Appearance Creation &amp; Enhancement using GANs.
 You will also need stylegan3 to generate the images.
 * Clone stylegan3 to another directory
 * Export stylegans dnnlib and torch_utils directories to PYTHONPATH
-  * `export PYTHONPATH="PathToStylegan3"/dnnlib:${PYTHONPATH}`
-  * `export PYTHONPATH="PathToStylegan3"/torch_utils:${PYTHONPATH}`
+  * `export PYTHONPATH="PathToStylegan3":${PYTHONPATH}`
 * In case you use the conda environemnt activate it and add the dependencies with this command
-  * `conda-develop "PathToStylegan3"/dnnlib`
-  * `conda-develop ""PathToStylegan3"/torch_utils`
+  * `conda-develop "PathToStylegan3"`
 
 ## Getting started
 1. Download the ffhq dataset using the ```data_downloader.py``` script.

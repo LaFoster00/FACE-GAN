@@ -1,10 +1,21 @@
 ﻿import pickle
+from pathlib import Path
 
 import torch
+from matplotlib import pyplot
 
-with open("/home/lasse/Git/FACE-GAN/training-runs/00001-stylegan3-r-ffhq_cond_stylegan3_128x128-gpus1-batch32-gamma0.5/network-snapshot-002440.pkl", "rb") as f:
+network_path = Path(__file__).parent / "../models/network-snapshot-004840.pkl"
+
+with open(network_path, "rb") as f:
     G = pickle.load(f)["G_ema"].cuda()
 z = torch.randn([1, G.z_dim]).cuda()
-c = [1, 35]
+z = z.repeat(2,1)
+c = torch.tensor([[1, 1], [1, 0]], dtype=torch.int32).cuda()
 img = G(z, c)
-print(img)
+img = (img.permute(0, 2, 3, 1).cpu() + 1) / 2
+print(img[0])
+pyplot.imshow(img[0])
+
+pyplot.show()
+pyplot.imshow(img[1])
+pyplot.show()
