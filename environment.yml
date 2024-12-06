@@ -2,14 +2,15 @@
 channels:
   - pytorch
   - nvidia
+  - conda-forge
 dependencies:
-  - python == 3.8
+  - python==3.8
   - pip
-  - numpy==1.22
+  - numpy==1.22.2
   - click==8.0
   - pillow=8.3.1
   - scipy=1.7.1
-  - pytorch=1.9.1
+  - pytorch
   - cudatoolkit=11.1
   - requests=2.26.0
   - tqdm=4.62.2
@@ -23,3 +24,4 @@ dependencies:
     - imageio-ffmpeg==0.4.3
     - pyspng
     - kagglehub
+    - psutil

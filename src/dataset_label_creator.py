@@ -12,6 +12,7 @@ import json
 @click.option('--target', help='Directory or archive name for target dataset', required=True, metavar='PATH')
 def create_dataset_labels(
         target: str):
+    print("Generating dataset labels from ffhq-features-dataset")
     target = Path(target)
     images = os.listdir(target)
     if len(images) == 0 or any([os.path.isdir(image) for image in images]):
