@@ -6,7 +6,6 @@ import torch
 from PIL import Image
 import numpy as np
 
-
 def generate_images(generator, labels, batch_size=32):
     generated_images = []
     print(f"Generating {len(labels)} images with batch size {batch_size}. Total batches {len(labels)//batch_size}.")
@@ -18,8 +17,9 @@ def generate_images(generator, labels, batch_size=32):
         latent_batch_tensor = torch.randn([len(labels_batch), generator.z_dim]).cuda()
         images = generator(latent_batch_tensor, labels_batch_tensor)
         images = images.permute(0, 2, 3, 1)
-        images_cpu = torch.clamp((images + 1.0) / 2.0, min=0.0, max=1.0).cpu()
+        images_cpu = torch.clamp(((images + 1.0) / 2.0) * 255, min=0.0, max=255.0).cpu()
         for index, image_cpu in enumerate(images_cpu):
+            image_cpu = image_cpu.numpy().astype(np.uint8)
             generated_images.append((labels_batch[index], image_cpu))
     return generated_images
 
@@ -79,8 +79,7 @@ def main(network_path=Path(__file__).parent / "../models",
     images = generate_images(g, labels, batch_size=32)
     for index, label_image in enumerate(images):
         label, image = label_image
-        image_array = (image.numpy() * 255).astype(np.uint8)
-        Image.fromarray(image_array).save(output_path / f"{label[0]}_{label[1]}__{index}.jpg", format="JPEG", quality=90)
+        Image.fromarray(image).save(output_path / f"{label[0]}_{label[1]}__{index}.jpg", format="JPEG", quality=90)
 
 
 if __name__ == "__main__":
