@@ -3,5 +3,6 @@
   <component name="VcsDirectoryMappings">
     <mapping directory="" vcs="Git" />
     <mapping directory="$PROJECT_DIR$/third_party/ffhq-features-dataset" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/third_party/stylegan3" vcs="Git" />
   </component>
 </project>
