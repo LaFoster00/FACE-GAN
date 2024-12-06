@@ -1,6 +1,9 @@
 data/
 datasets/
 tmp/
+training-runs/
+models/
+saved_models/
 
 wandb/
 
