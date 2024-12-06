@@ -4,6 +4,7 @@ tmp/
 training-runs/
 models/
 saved_models/
+generated_images/
 
 wandb/
 
