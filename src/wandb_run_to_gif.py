@@ -1,31 +1,15 @@
 import click
 import wandb
-from PIL import Image
 from pathlib import Path
 import os
 import concurrent.futures
 from tqdm import tqdm
 
-
-def images_to_gif(image_fnames, fname, duration):
-    image_fnames.sort(key=lambda x: int(x.split('_')[-2]))  # sort by step
-    frames = [Image.open(image) for image in image_fnames]
-    frame_one = frames[0]
-    frame_one.save(f'{fname}.gif', format="GIF", append_images=frames,
-                   save_all=True, duration=duration, loop=1)
+from utils import images_to_gif, get_image_paths
 
 def download_file(file, root):
     if file.name.endswith('.png'):
         file.download(root=root, exist_ok=True)
-
-def get_image_paths(directory):
-    image_extensions = ("*.png", "*.jpg", "*.jpeg")
-    image_paths = []
-
-    for ext in image_extensions:
-        image_paths.extend(Path(directory).rglob(ext))
-
-    return [str(path) for path in image_paths]
 
 @click.command()
 @click.option('--run-path', required=True, type=str, default=None, help='Path to wandb run, from wandb run info.')
