@@ -5,6 +5,10 @@ FACE-GAN uses nvidia's stylegan3 model to train a conditional gan that can gener
 
 For an example of how to generate images using a finished model look at `src/generate_images.py` 
 
+![Training Preview After 10M Images](./readme_data/Training_Preview_10M.png)
+This is result of training the conditional model for ~10M images.
+All images should be male and all ages are in the same range.
+
 ## Requirements
 ### FACE-GAN
 * Linux is supported.
@@ -20,10 +24,11 @@ For an example of how to generate images using a finished model look at `src/gen
 You will also need stylegan3 to generate the images.
 1. Init, update all submodules. Stylegan3 will be downloaded now.
 2. Export stylegans dnnlib and torch_utils directories to the python environment using this command
-   * `conda-develop third_party/stylegan3`
+   * `conda develop third_party/stylegan3`
 
 ## Getting started
 1. Download the ffhq dataset using [data_downloader.py](./src/data_downloader.py).
+   - `python src/data_downloader.py`
 2. Create the dataset.json containing the labels for age and gender using the [dataset_label_creator.py](./src/dataset_label_creator.py) script.
    - `python src/dataset_label_creator.py --target=data/ffhq/images1024x1024`
 3. Create the dataset for training using the [dataset_tool.py](./third_party/stylegan3/dataset_tool.py). Change the resolution to whatever your target might be.

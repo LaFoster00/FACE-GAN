@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 import os
+from PIL import Image
 
 def append_list(a, b):
     """
@@ -42,3 +43,19 @@ def generate_ffhq_labels(image_paths):
     labels = [mapped_labels[int(Path(image_path).stem)] for image_path in image_paths]
 
     return image_paths, labels
+
+def get_image_paths(directory):
+    image_extensions = ("*.png", "*.jpg", "*.jpeg")
+    image_paths = []
+
+    for ext in image_extensions:
+        image_paths.extend(Path(directory).rglob(ext))
+
+    return [str(path) for path in image_paths]
+
+def images_to_gif(image_fnames, fname, duration, sort_func = lambda x: int(x.split('_')[-2])):
+    image_fnames.sort(key=sort_func)  # sort by step
+    frames = [Image.open(image) for image in image_fnames]
+    frame_one = frames[0]
+    frame_one.save(f'{fname}.gif', format="GIF", append_images=frames,
+                   save_all=True, duration=duration, loop=1)

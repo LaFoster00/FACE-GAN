@@ -5,6 +5,8 @@ training-runs/
 models/
 saved_models/
 generated_images/
+wand_run_data/
+wandb_run_data/
 
 wandb/
 
